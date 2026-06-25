@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TAIEX K-Means Clustering Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ml-kmeans@4.0.0/lib/index.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-primary: #f8fafc;
+            --accent: #38bdf8;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            color: var(--accent);
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .status-card {
+            background: var(--card-bg);
+            padding: 15px 25px;
+            border-radius: 12px;
+            border-left: 5px solid var(--accent);
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+        }
+
+        #chart {
+            width: 100%;
+            height: 650px;
+            background: var(--card-bg);
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+        }
+
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--accent);
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 10px;
+        }
+
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>TAIEX 市場位階分析</h1>
+        <p>基於 K-Means 機器學習算法之自動聚類系統 (K=5)</p>
+    </header>
+
+    <div class="status-card" id="statusBox">
+        <div class="loader" id="loader"></div>
+        <span id="statusText">正在從 Google Sheets 獲取即時數據...</span>
+    </div>
+
+    <div id="chart"></div>
+</div>
+
+<script>
+    // 你的 Google Sheets CSV 發布網址
+    const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRv5-oA8DNbp3N-TlBwmdG63ZBqdzw1wBJZiAy9x-T6eNIec-dzoGvF4gP2rnn25eIEs_kodTDnORTC/pub?output=csv';
+
+    // 1. 移動平均線計算
+    function calculateMA(data, period) {
+        let ma = new Array(data.length).fill(null);
+        for (let i = period - 1; i < data.length; i++) {
+            let sum = 0;
+            for (let j = 0; j < period; j++) sum += data[i - j];
+            ma[i] = sum / period;
+        }
+        return ma;
+    }
+
+    // 2. 標準差計算 (波動率)
+    function calculateVolatility(data, period) {
+        let vol = new Array(data.length).fill(null);
+        for (let i = period; i < data.length; i++) {
+            let returns = [];
+            for (let j = 0; j < period; j++) {
+                returns.push((data[i-j] - data[i-j-1]) / data[i-j-1]);
+            }
+            let mean = returns.reduce((a, b) => a + b) / period;
+            let sqDiff = returns.map(r => Math.pow(r - mean, 2));
+            vol[i] = Math.sqrt(sqDiff.reduce((a, b) => a + b) / period);
+        }
+        return vol;
+    }
+
+    // 3. 標準化 (StandardScaler 簡化版)
+    function standardize(features) {
+        const n = features.length;
+        const m = features[0].length;
+        let standardized = Array.from({length: n}, () => []);
+
+        for (let j = 0; j < m; j++) {
+            let col = features.map(row => row[j]);
+            let avg = col.reduce((a, b) => a + b) / n;
+            let std = Math.sqrt(col.map(x => Math.pow(x - avg, 2)).reduce((a, b) => a + b) / n);
+            for (let i = 0; i < n; i++) {
+                standardized[i][j] = (features[i][j] - avg) / std;
+            }
+        }
+        return standardized;
+    }
+
+    // 主程式：使用 PapaParse 讀取 CSV
+    Papa.parse(CSV_URL, {
+        download: true,
+        header: true,
+        dynamicTyping: true,
+        complete: function(results) {
+            try {
+                // 過濾掉空行或缺少必要資料的行數
+                let df = results.data.filter(row => row.date && row.close);
+                
+                const close = df.map(r => r.close);
+                const volume = df.map(r => r.trading_money || r.trading_volume);
+                
+                // 特徵工程
+                const ma10 = calculateMA(close, 10);
+                const ma20 = calculateMA(close, 20);
+                const volMa10 = calculateMA(volume, 10);
+                const volMa20 = calculateMA(volume, 20);
+                
+                const bias10 = close.map((v, i) => ma10[i] ? (v - ma10[i]) / ma10[i] : null);
+                const bias20 = close.map((v, i) => ma20[i] ? (v - ma20[i]) / ma20[i] : null);
+                const vol10 = calculateVolatility(close, 10);
+                const vol20 = calculateVolatility(close, 20);
+                const ratio10 = volume.map((v, i) => volMa10[i] ? v / volMa10[i] : null);
+                const ratio20 = volume.map((v, i) => volMa20[i] ? v / volMa20[i] : null);
+
+                // 組合特徵矩陣，排除含有 null 的資料
+                let finalDf = [];
+                let X = [];
+                for (let i = 0; i < df.length; i++) {
+                    if (bias20[i] !== null && vol20[i] !== null && ratio20[i] !== null) {
+                        const feat = [bias10[i], bias20[i], vol10[i], vol20[i], ratio10[i], ratio20[i]];
+                        X.push(feat);
+                        finalDf.push({...df[i], feat: feat});
+                    }
+                }
+
+                if (X.length < 5) throw new Error("有效數據不足，無法執行 K-Means 分析。");
+
+                // K-Means 聚類
+                const scaledX = standardize(X);
+                const ans = mlKmeans.default(scaledX, 5, { initialization: 'kmeans++', seed: 42 });
+                
+                // 標籤映射 (根據 Bias20 進行排序，邏輯同 Python 版)
+                let clusterStats = [0,1,2,3,4].map(c => {
+                    let subset = X.filter((_, i) => ans.clusters[i] === c);
+                    let avgBias = subset.length > 0 ? subset.reduce((a, b) => a + b[1], 0) / subset.length : 0;
+                    return { id: c, avgBias: avgBias };
+                }).sort((a, b) => b.avgBias - a.avgBias);
+
+                const regimeMap = {
+                    [clusterStats[0].id]: { name: 'Extreme_Sell', color: '#008000' },
+                    [clusterStats[1].id]: { name: 'Sell_Zone', color: '#90EE90' },
+                    [clusterStats[2].id]: { name: 'Wait_Zone', color: '#A6A6A6' },
+                    [clusterStats[3].id]: { name: 'Buy_Zone', color: '#FFB6C1' },
+                    [clusterStats[4].id]: { name: 'Extreme_Buy', color: '#FF0000' }
+                };
+
+                // 準備繪圖數據 (取最後 500 筆)
+                const plotData = finalDf.slice(-500);
+                const plotClusters = ans.clusters.slice(-500);
+
+                let traces = Object.keys(regimeMap).map(cid => {
+                    let subset = plotData.filter((_, i) => plotClusters[i] == cid);
+                    return {
+                        x: subset.map(d => d.date),
+                        y: subset.map(d => d.close),
+                        mode: 'markers',
+                        name: regimeMap[cid].name,
+                        marker: { color: regimeMap[cid].color, size: 8 }
+                    };
+                });
+
+                // 加入收盤價連線作為底圖參考
+                traces.push({
+                    x: plotData.map(d => d.date),
+                    y: plotData.map(d => d.close),
+                    mode: 'lines',
+                    name: 'TAIEX Close',
+                    line: { color: 'rgba(255,255,255,0.2)', width: 1 }
+                });
+
+                // 呼叫 Plotly 進行繪圖
+                Plotly.newPlot('chart', traces, {
+                    paper_bgcolor: 'rgba(0,0,0,0)',
+                    plot_bgcolor: 'rgba(0,0,0,0)',
+                    font: { color: '#fff' },
+                    margin: { t: 50, r: 30, l: 60, b: 50 },
+                    xaxis: { gridcolor: '#334155' },
+                    yaxis: { gridcolor: '#334155' },
+                    title: 'TAIEX 市場位階聚類分析結果 (最近 500 日數據)'
+                });
+
+                // 狀態更新：隱藏讀取動畫，顯示完成訊息
+                document.getElementById('statusBox').style.borderColor = '#10b981';
+                document.getElementById('statusText').innerText = `分析完成：已成功處理 ${df.length} 筆資料並完成聚類。`;
+                document.getElementById('loader').style.display = 'none';
+
+            } catch (err) {
+                // 錯誤處理
+                document.getElementById('statusText').innerText = "分析出錯: " + err.message;
+                document.getElementById('loader').style.display = 'none';
+                document.getElementById('statusBox').style.borderColor = '#ef4444';
+                console.error(err);
+            }
+        },
+        error: function(err) {
+            document.getElementById('statusText').innerText = "讀取資料失敗，請檢查網路連線或 CSV 網址是否正確發布。";
+            document.getElementById('loader').style.display = 'none';
+            document.getElementById('statusBox').style.borderColor = '#ef4444';
+            console.error(err);
+        }
+    });
+</script>
+
+</body>
+</html>
