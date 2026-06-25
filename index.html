@@ -6,7 +6,6 @@
     <title>TAIEX K-Means Clustering Dashboard</title>
     <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/ml-kmeans@4.0.0/lib/index.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
     
     <style>
@@ -16,7 +15,6 @@
             --text-primary: #f8fafc;
             --accent: #38bdf8;
         }
-
         body {
             font-family: 'Inter', sans-serif;
             background-color: var(--bg-color);
@@ -27,23 +25,19 @@
             flex-direction: column;
             align-items: center;
         }
-
         .container {
             width: 100%;
             max-width: 1200px;
         }
-
         header {
             text-align: center;
             margin-bottom: 30px;
         }
-
         h1 {
             color: var(--accent);
             font-size: 2.5rem;
             margin-bottom: 10px;
         }
-
         .status-card {
             background: var(--card-bg);
             padding: 15px 25px;
@@ -52,7 +46,6 @@
             margin-bottom: 20px;
             font-size: 0.9rem;
         }
-
         #chart {
             width: 100%;
             height: 650px;
@@ -60,7 +53,6 @@
             border-radius: 16px;
             box-shadow: 0 10px 25px rgba(0,0,0,0.3);
         }
-
         .loader {
             border: 4px solid #f3f3f3;
             border-top: 4px solid var(--accent);
@@ -72,7 +64,6 @@
             vertical-align: middle;
             margin-right: 10px;
         }
-
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
@@ -92,11 +83,12 @@
     <div id="chart"></div>
 </div>
 
-<script>
-    // 你的 Google Sheets CSV 發布網址
+<script type="module">
+    // 正確引入 ml-kmeans 模組
+    import { kmeans } from 'https://esm.sh/ml-kmeans@4.2.1';
+
     const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRv5-oA8DNbp3N-TlBwmdG63ZBqdzw1wBJZiAy9x-T6eNIec-dzoGvF4gP2rnn25eIEs_kodTDnORTC/pub?output=csv';
 
-    // 1. 移動平均線計算
     function calculateMA(data, period) {
         let ma = new Array(data.length).fill(null);
         for (let i = period - 1; i < data.length; i++) {
@@ -107,7 +99,6 @@
         return ma;
     }
 
-    // 2. 標準差計算 (波動率)
     function calculateVolatility(data, period) {
         let vol = new Array(data.length).fill(null);
         for (let i = period; i < data.length; i++) {
@@ -122,7 +113,6 @@
         return vol;
     }
 
-    // 3. 標準化 (StandardScaler 簡化版)
     function standardize(features) {
         const n = features.length;
         const m = features[0].length;
@@ -139,20 +129,17 @@
         return standardized;
     }
 
-    // 主程式：使用 PapaParse 讀取 CSV
     Papa.parse(CSV_URL, {
         download: true,
         header: true,
         dynamicTyping: true,
         complete: function(results) {
             try {
-                // 過濾掉空行或缺少必要資料的行數
                 let df = results.data.filter(row => row.date && row.close);
                 
                 const close = df.map(r => r.close);
                 const volume = df.map(r => r.trading_money || r.trading_volume);
                 
-                // 特徵工程
                 const ma10 = calculateMA(close, 10);
                 const ma20 = calculateMA(close, 20);
                 const volMa10 = calculateMA(volume, 10);
@@ -165,7 +152,6 @@
                 const ratio10 = volume.map((v, i) => volMa10[i] ? v / volMa10[i] : null);
                 const ratio20 = volume.map((v, i) => volMa20[i] ? v / volMa20[i] : null);
 
-                // 組合特徵矩陣，排除含有 null 的資料
                 let finalDf = [];
                 let X = [];
                 for (let i = 0; i < df.length; i++) {
@@ -178,11 +164,11 @@
 
                 if (X.length < 5) throw new Error("有效數據不足，無法執行 K-Means 分析。");
 
-                // K-Means 聚類
                 const scaledX = standardize(X);
-                const ans = mlKmeans.default(scaledX, 5, { initialization: 'kmeans++', seed: 42 });
                 
-                // 標籤映射 (根據 Bias20 進行排序，邏輯同 Python 版)
+                // 使用正確載入的 kmeans 函數
+                const ans = kmeans(scaledX, 5, { initialization: 'kmeans++', seed: 42 });
+                
                 let clusterStats = [0,1,2,3,4].map(c => {
                     let subset = X.filter((_, i) => ans.clusters[i] === c);
                     let avgBias = subset.length > 0 ? subset.reduce((a, b) => a + b[1], 0) / subset.length : 0;
@@ -197,7 +183,6 @@
                     [clusterStats[4].id]: { name: 'Extreme_Buy', color: '#FF0000' }
                 };
 
-                // 準備繪圖數據 (取最後 500 筆)
                 const plotData = finalDf.slice(-500);
                 const plotClusters = ans.clusters.slice(-500);
 
@@ -212,7 +197,6 @@
                     };
                 });
 
-                // 加入收盤價連線作為底圖參考
                 traces.push({
                     x: plotData.map(d => d.date),
                     y: plotData.map(d => d.close),
@@ -221,7 +205,6 @@
                     line: { color: 'rgba(255,255,255,0.2)', width: 1 }
                 });
 
-                // 呼叫 Plotly 進行繪圖
                 Plotly.newPlot('chart', traces, {
                     paper_bgcolor: 'rgba(0,0,0,0)',
                     plot_bgcolor: 'rgba(0,0,0,0)',
@@ -232,13 +215,11 @@
                     title: 'TAIEX 市場位階聚類分析結果 (最近 500 日數據)'
                 });
 
-                // 狀態更新：隱藏讀取動畫，顯示完成訊息
                 document.getElementById('statusBox').style.borderColor = '#10b981';
                 document.getElementById('statusText').innerText = `分析完成：已成功處理 ${df.length} 筆資料並完成聚類。`;
                 document.getElementById('loader').style.display = 'none';
 
             } catch (err) {
-                // 錯誤處理
                 document.getElementById('statusText').innerText = "分析出錯: " + err.message;
                 document.getElementById('loader').style.display = 'none';
                 document.getElementById('statusBox').style.borderColor = '#ef4444';
@@ -246,10 +227,9 @@
             }
         },
         error: function(err) {
-            document.getElementById('statusText').innerText = "讀取資料失敗，請檢查網路連線或 CSV 網址是否正確發布。";
+            document.getElementById('statusText').innerText = "讀取資料失敗，請檢查網路連線。";
             document.getElementById('loader').style.display = 'none';
             document.getElementById('statusBox').style.borderColor = '#ef4444';
-            console.error(err);
         }
     });
 </script>
