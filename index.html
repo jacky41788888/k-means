@@ -64,7 +64,7 @@
         }
         #chart {
             width: 100%;
-            height: 650px;
+            height: 700px; /* 稍微加高以容納下方時間拉桿 */
             background: var(--card-bg);
             border-radius: 16px;
             box-shadow: 0 10px 25px rgba(0,0,0,0.3);
@@ -90,12 +90,12 @@
 
     <header>
         <h1>TAIEX 市場位階分析</h1>
-        <p>基於 K-Means 演算法之自動聚類系統 (K=5)</p>
+        <p>基於 K-Means 演算法之自動聚類系統 (完整歷史數據)</p>
     </header>
 
     <div class="status-card" id="statusBox">
         <div class="loader" id="loader"></div>
-        <span id="statusText">正在清理數據並進行機器學習運算...</span>
+        <span id="statusText">正在處理全歷史數據並進行機器學習運算，請稍候...</span>
     </div>
 
     <div id="chart"></div>
@@ -203,12 +203,14 @@
     Papa.parse(CSV_URL, {
         download: true,
         header: true,
-        dynamicTyping: false, // 關閉自動轉型，手動處理千分位逗號
+        dynamicTyping: false, 
         complete: function(results) {
             try {
                 let df = results.data.filter(row => row.date && row.close);
                 
-                // 【修復關鍵】：過濾所有千分位逗號，強制轉為浮點數，避免 NaN 破壞模型
+                // 【修復 1】：強制按日期進行升冪排序 (舊 -> 新)，解決年份顛倒問題
+                df.sort((a, b) => new Date(a.date) - new Date(b.date));
+
                 const close = df.map(r => parseFloat(String(r.close).replace(/,/g, '')));
                 const volume = df.map(r => {
                     let val = (r.trading_money !== undefined && r.trading_money !== '') ? r.trading_money : r.trading_volume;
@@ -230,7 +232,6 @@
                 let finalDf = [];
                 let X = [];
                 for (let i = 0; i < df.length; i++) {
-                    // 二次防呆：確保送入模型的數值皆為有效數字
                     if (bias20[i] !== null && !isNaN(bias20[i]) && !isNaN(vol20[i]) && !isNaN(ratio20[i])) {
                         const feat = [bias10[i], bias20[i], vol10[i], vol20[i], ratio10[i], ratio20[i]];
                         X.push(feat);
@@ -243,7 +244,6 @@
                 const scaledX = standardize(X);
                 const allClusters = runKMeans(scaledX, 5);
                 
-                // 根據乖離率 Bias20 由大到小排序，對應 Extreme_Sell 到 Extreme_Buy
                 let clusterStats = [0,1,2,3,4].map(c => {
                     let subset = X.filter((_, i) => allClusters[i] === c);
                     let avgBias = subset.length > 0 ? subset.reduce((a, b) => a + b[1], 0) / subset.length : -999;
@@ -258,9 +258,9 @@
                     [clusterStats[4].id]: { name: 'Extreme_Buy', color: '#FF0000' }
                 };
 
-                // 【需求更新】：僅顯示近 250 個交易日 (約一年)
-                const plotData = finalDf.slice(-250);
-                const plotClusters = allClusters.slice(-250);
+                // 【升級】：載入所有數據，不切割 slice
+                const plotData = finalDf;
+                const plotClusters = allClusters;
 
                 let traces = Object.keys(regimeMap).map(cid => {
                     let subset = plotData.filter((_, i) => plotClusters[i] == cid);
@@ -269,7 +269,7 @@
                         y: subset.map(d => d.close),
                         mode: 'markers',
                         name: regimeMap[cid].name,
-                        marker: { color: regimeMap[cid].color, size: 8 }
+                        marker: { color: regimeMap[cid].color, size: 6 } // 點微調小一點，讓長期走勢更清晰
                     };
                 });
 
@@ -286,13 +286,19 @@
                     plot_bgcolor: 'rgba(0,0,0,0)',
                     font: { color: '#fff' },
                     margin: { t: 50, r: 30, l: 60, b: 50 },
-                    xaxis: { gridcolor: '#334155' },
+                    // 【升級】：加入互動式時間拉桿，並確保 X 軸辨識為日期
+                    xaxis: { 
+                        gridcolor: '#334155',
+                        type: 'date',
+                        rangeslider: { visible: true, bgcolor: '#0f172a' }
+                    },
                     yaxis: { gridcolor: '#334155' },
-                    title: 'TAIEX 市場位階聚類分析結果 (近一年數據)'
+                    title: 'TAIEX 市場位階聚類分析結果 (完整歷史)',
+                    hovermode: 'x unified'
                 });
 
                 document.getElementById('statusBox').style.borderColor = '#10b981';
-                document.getElementById('statusText').innerText = `分析完成：成功處理並渲染近一年之台股數據。`;
+                document.getElementById('statusText').innerText = `分析完成：成功處理全歷史共 ${finalDf.length} 筆交易日數據！可用下方拉桿縮放時間。`;
                 document.getElementById('loader').style.display = 'none';
 
             } catch (err) {
