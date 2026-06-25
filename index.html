@@ -72,23 +72,21 @@
 <div class="container">
     <header>
         <h1>TAIEX 市場位階分析</h1>
-        <p>基於 K-Means 機器學習算法之自動聚類系統 (K=5)</p>
+        <p>基於自建 K-Means 演算法之自動聚類系統 (K=5)</p>
     </header>
 
     <div class="status-card" id="statusBox">
         <div class="loader" id="loader"></div>
-        <span id="statusText">正在從 Google Sheets 獲取即時數據...</span>
+        <span id="statusText">正在從 Google Sheets 獲取即時數據並進行運算...</span>
     </div>
 
     <div id="chart"></div>
 </div>
 
-<script type="module">
-    // 正確引入 ml-kmeans 模組
-    import kmeans from 'https://esm.sh/ml-kmeans@4.2.1';
-
+<script>
     const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRv5-oA8DNbp3N-TlBwmdG63ZBqdzw1wBJZiAy9x-T6eNIec-dzoGvF4gP2rnn25eIEs_kodTDnORTC/pub?output=csv';
 
+    // 1. 移動平均線
     function calculateMA(data, period) {
         let ma = new Array(data.length).fill(null);
         for (let i = period - 1; i < data.length; i++) {
@@ -99,6 +97,7 @@
         return ma;
     }
 
+    // 2. 波動率
     function calculateVolatility(data, period) {
         let vol = new Array(data.length).fill(null);
         for (let i = period; i < data.length; i++) {
@@ -113,6 +112,7 @@
         return vol;
     }
 
+    // 3. 標準化 (增加防呆機制)
     function standardize(features) {
         const n = features.length;
         const m = features[0].length;
@@ -122,6 +122,7 @@
             let col = features.map(row => row[j]);
             let avg = col.reduce((a, b) => a + b) / n;
             let std = Math.sqrt(col.map(x => Math.pow(x - avg, 2)).reduce((a, b) => a + b) / n);
+            if (std === 0) std = 1; // 防止除以零
             for (let i = 0; i < n; i++) {
                 standardized[i][j] = (features[i][j] - avg) / std;
             }
@@ -129,6 +130,66 @@
         return standardized;
     }
 
+    // 4. 🔥 自建 K-Means 演算法 (絕對穩定，不再依賴外部套件)
+    function runKMeans(data, k, maxIter = 100) {
+        let centroids = [];
+        let indices = new Set();
+        // 隨機初始化群中心
+        while (centroids.length < k && indices.size < data.length) {
+            let idx = Math.floor(Math.random() * data.length);
+            if (!indices.has(idx)) {
+                indices.add(idx);
+                centroids.push([...data[idx]]);
+            }
+        }
+        
+        let clusters = new Array(data.length).fill(0);
+        
+        for (let iter = 0; iter < maxIter; iter++) {
+            let changed = false;
+            // 分配最近的群
+            for (let i = 0; i < data.length; i++) {
+                let minDist = Infinity;
+                let minIdx = 0;
+                for (let j = 0; j < k; j++) {
+                    let dist = 0;
+                    for (let d = 0; d < data[0].length; d++) {
+                        dist += Math.pow(data[i][d] - centroids[j][d], 2);
+                    }
+                    if (dist < minDist) {
+                        minDist = dist;
+                        minIdx = j;
+                    }
+                }
+                if (clusters[i] !== minIdx) {
+                    clusters[i] = minIdx;
+                    changed = true;
+                }
+            }
+            if (!changed) break;
+            
+            // 更新群中心
+            let sums = Array.from({length: k}, () => new Array(data[0].length).fill(0));
+            let counts = new Array(k).fill(0);
+            for (let i = 0; i < data.length; i++) {
+                let c = clusters[i];
+                counts[c]++;
+                for (let d = 0; d < data[0].length; d++) {
+                    sums[c][d] += data[i][d];
+                }
+            }
+            for (let j = 0; j < k; j++) {
+                if (counts[j] > 0) {
+                    for (let d = 0; d < data[0].length; d++) {
+                        centroids[j][d] = sums[j][d] / counts[j];
+                    }
+                }
+            }
+        }
+        return clusters;
+    }
+
+    // 主程式：讀取 CSV 並分析
     Papa.parse(CSV_URL, {
         download: true,
         header: true,
@@ -164,13 +225,15 @@
 
                 if (X.length < 5) throw new Error("有效數據不足，無法執行 K-Means 分析。");
 
+                // 資料標準化
                 const scaledX = standardize(X);
                 
-                // 使用正確載入的 kmeans 函數
-                const ans = kmeans(scaledX, 5, { initialization: 'kmeans++', seed: 42 });
+                // 執行我們自建的 K-Means
+                const allClusters = runKMeans(scaledX, 5);
                 
+                // 標籤映射
                 let clusterStats = [0,1,2,3,4].map(c => {
-                    let subset = X.filter((_, i) => ans.clusters[i] === c);
+                    let subset = X.filter((_, i) => allClusters[i] === c);
                     let avgBias = subset.length > 0 ? subset.reduce((a, b) => a + b[1], 0) / subset.length : 0;
                     return { id: c, avgBias: avgBias };
                 }).sort((a, b) => b.avgBias - a.avgBias);
@@ -183,8 +246,9 @@
                     [clusterStats[4].id]: { name: 'Extreme_Buy', color: '#FF0000' }
                 };
 
+                // 取最後 500 筆資料繪圖
                 const plotData = finalDf.slice(-500);
-                const plotClusters = ans.clusters.slice(-500);
+                const plotClusters = allClusters.slice(-500);
 
                 let traces = Object.keys(regimeMap).map(cid => {
                     let subset = plotData.filter((_, i) => plotClusters[i] == cid);
@@ -216,7 +280,7 @@
                 });
 
                 document.getElementById('statusBox').style.borderColor = '#10b981';
-                document.getElementById('statusText').innerText = `分析完成：已成功處理 ${df.length} 筆資料並完成聚類。`;
+                document.getElementById('statusText').innerText = `分析完成：已成功處理 ${df.length} 筆資料。`;
                 document.getElementById('loader').style.display = 'none';
 
             } catch (err) {
