@@ -29,9 +29,25 @@
             width: 100%;
             max-width: 1200px;
         }
+        .nav-link {
+            display: inline-block;
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 600;
+            padding: 10px 20px;
+            background: var(--card-bg);
+            border-radius: 8px;
+            border: 1px solid #334155;
+            margin-bottom: 20px;
+            transition: all 0.2s;
+        }
+        .nav-link:hover {
+            background: #334155;
+            color: #fff;
+        }
         header {
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
         }
         h1 {
             color: var(--accent);
@@ -70,14 +86,16 @@
 <body>
 
 <div class="container">
+    <a href="https://jacky41788888.github.io/web/" class="nav-link">&larr; 返回首頁</a>
+
     <header>
         <h1>TAIEX 市場位階分析</h1>
-        <p>基於自建 K-Means 演算法之自動聚類系統 (K=5)</p>
+        <p>基於 K-Means 演算法之自動聚類系統 (K=5)</p>
     </header>
 
     <div class="status-card" id="statusBox">
         <div class="loader" id="loader"></div>
-        <span id="statusText">正在從 Google Sheets 獲取即時數據並進行運算...</span>
+        <span id="statusText">正在清理數據並進行機器學習運算...</span>
     </div>
 
     <div id="chart"></div>
@@ -86,7 +104,6 @@
 <script>
     const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRv5-oA8DNbp3N-TlBwmdG63ZBqdzw1wBJZiAy9x-T6eNIec-dzoGvF4gP2rnn25eIEs_kodTDnORTC/pub?output=csv';
 
-    // 1. 移動平均線
     function calculateMA(data, period) {
         let ma = new Array(data.length).fill(null);
         for (let i = period - 1; i < data.length; i++) {
@@ -97,7 +114,6 @@
         return ma;
     }
 
-    // 2. 波動率
     function calculateVolatility(data, period) {
         let vol = new Array(data.length).fill(null);
         for (let i = period; i < data.length; i++) {
@@ -112,7 +128,6 @@
         return vol;
     }
 
-    // 3. 標準化 (增加防呆機制)
     function standardize(features) {
         const n = features.length;
         const m = features[0].length;
@@ -122,7 +137,7 @@
             let col = features.map(row => row[j]);
             let avg = col.reduce((a, b) => a + b) / n;
             let std = Math.sqrt(col.map(x => Math.pow(x - avg, 2)).reduce((a, b) => a + b) / n);
-            if (std === 0) std = 1; // 防止除以零
+            if (std === 0 || isNaN(std)) std = 1; 
             for (let i = 0; i < n; i++) {
                 standardized[i][j] = (features[i][j] - avg) / std;
             }
@@ -130,11 +145,9 @@
         return standardized;
     }
 
-    // 4. 🔥 自建 K-Means 演算法 (絕對穩定，不再依賴外部套件)
     function runKMeans(data, k, maxIter = 100) {
         let centroids = [];
         let indices = new Set();
-        // 隨機初始化群中心
         while (centroids.length < k && indices.size < data.length) {
             let idx = Math.floor(Math.random() * data.length);
             if (!indices.has(idx)) {
@@ -147,7 +160,6 @@
         
         for (let iter = 0; iter < maxIter; iter++) {
             let changed = false;
-            // 分配最近的群
             for (let i = 0; i < data.length; i++) {
                 let minDist = Infinity;
                 let minIdx = 0;
@@ -168,7 +180,6 @@
             }
             if (!changed) break;
             
-            // 更新群中心
             let sums = Array.from({length: k}, () => new Array(data[0].length).fill(0));
             let counts = new Array(k).fill(0);
             for (let i = 0; i < data.length; i++) {
@@ -189,17 +200,20 @@
         return clusters;
     }
 
-    // 主程式：讀取 CSV 並分析
     Papa.parse(CSV_URL, {
         download: true,
         header: true,
-        dynamicTyping: true,
+        dynamicTyping: false, // 關閉自動轉型，手動處理千分位逗號
         complete: function(results) {
             try {
                 let df = results.data.filter(row => row.date && row.close);
                 
-                const close = df.map(r => r.close);
-                const volume = df.map(r => r.trading_money || r.trading_volume);
+                // 【修復關鍵】：過濾所有千分位逗號，強制轉為浮點數，避免 NaN 破壞模型
+                const close = df.map(r => parseFloat(String(r.close).replace(/,/g, '')));
+                const volume = df.map(r => {
+                    let val = (r.trading_money !== undefined && r.trading_money !== '') ? r.trading_money : r.trading_volume;
+                    return parseFloat(String(val).replace(/,/g, ''));
+                });
                 
                 const ma10 = calculateMA(close, 10);
                 const ma20 = calculateMA(close, 20);
@@ -216,25 +230,23 @@
                 let finalDf = [];
                 let X = [];
                 for (let i = 0; i < df.length; i++) {
-                    if (bias20[i] !== null && vol20[i] !== null && ratio20[i] !== null) {
+                    // 二次防呆：確保送入模型的數值皆為有效數字
+                    if (bias20[i] !== null && !isNaN(bias20[i]) && !isNaN(vol20[i]) && !isNaN(ratio20[i])) {
                         const feat = [bias10[i], bias20[i], vol10[i], vol20[i], ratio10[i], ratio20[i]];
                         X.push(feat);
-                        finalDf.push({...df[i], feat: feat});
+                        finalDf.push({...df[i], close: close[i], feat: feat});
                     }
                 }
 
                 if (X.length < 5) throw new Error("有效數據不足，無法執行 K-Means 分析。");
 
-                // 資料標準化
                 const scaledX = standardize(X);
-                
-                // 執行我們自建的 K-Means
                 const allClusters = runKMeans(scaledX, 5);
                 
-                // 標籤映射
+                // 根據乖離率 Bias20 由大到小排序，對應 Extreme_Sell 到 Extreme_Buy
                 let clusterStats = [0,1,2,3,4].map(c => {
                     let subset = X.filter((_, i) => allClusters[i] === c);
-                    let avgBias = subset.length > 0 ? subset.reduce((a, b) => a + b[1], 0) / subset.length : 0;
+                    let avgBias = subset.length > 0 ? subset.reduce((a, b) => a + b[1], 0) / subset.length : -999;
                     return { id: c, avgBias: avgBias };
                 }).sort((a, b) => b.avgBias - a.avgBias);
 
@@ -246,9 +258,9 @@
                     [clusterStats[4].id]: { name: 'Extreme_Buy', color: '#FF0000' }
                 };
 
-                // 取最後 500 筆資料繪圖
-                const plotData = finalDf.slice(-500);
-                const plotClusters = allClusters.slice(-500);
+                // 【需求更新】：僅顯示近 250 個交易日 (約一年)
+                const plotData = finalDf.slice(-250);
+                const plotClusters = allClusters.slice(-250);
 
                 let traces = Object.keys(regimeMap).map(cid => {
                     let subset = plotData.filter((_, i) => plotClusters[i] == cid);
@@ -276,11 +288,11 @@
                     margin: { t: 50, r: 30, l: 60, b: 50 },
                     xaxis: { gridcolor: '#334155' },
                     yaxis: { gridcolor: '#334155' },
-                    title: 'TAIEX 市場位階聚類分析結果 (最近 500 日數據)'
+                    title: 'TAIEX 市場位階聚類分析結果 (近一年數據)'
                 });
 
                 document.getElementById('statusBox').style.borderColor = '#10b981';
-                document.getElementById('statusText').innerText = `分析完成：已成功處理 ${df.length} 筆資料。`;
+                document.getElementById('statusText').innerText = `分析完成：成功處理並渲染近一年之台股數據。`;
                 document.getElementById('loader').style.display = 'none';
 
             } catch (err) {
