@@ -150,7 +150,6 @@
 </div>
 
 <script>
-    // 讀取數據的網址已更新
     const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRv5-oA8DNbp3N-TlBwmdG63ZBqdzw1wBJZiAy9x-T6eNIec-dzoGvF4gP2rnn25eIEs_kodTDnORTC/pub?output=csv';
     let globalRawData = []; 
 
@@ -320,19 +319,18 @@
                     mode: 'markers',
                     name: regimeMap[cid].name,
                     marker: { color: regimeMap[cid].color, size: 6 },
-                    // 明確顯示 日期、指數、成交量，加上 <extra></extra> 隱藏右側預設的 trace 名稱
-                    hovertemplate: '日期: %{x}<br>指數: %{y:,.0f}<br>成交量: %{customdata}<extra></extra>' 
+                    // 【修改 1】使用 %{x|%Y-%m-%d} 強制設定提示框的日期顯示格式為純數字 (如 2026-06-26)
+                    hovertemplate: '日期: %{x|%Y-%m-%d}<br>指數: %{y:,.0f}<br>成交量: %{customdata}<extra></extra>' 
                 };
             });
 
-            // 讓背景白線在 hover 時略過，避免出現兩筆重複資料
             traces.push({
                 x: plotData.map(d => d.date),
                 y: plotData.map(d => d.close),
                 mode: 'lines',
                 name: 'TAIEX Close',
                 line: { color: 'rgba(255,255,255,0.2)', width: 1 },
-                hoverinfo: 'skip' 
+                hoverinfo: 'skip'
             });
 
             const latestDateString = plotData[plotData.length - 1].date;
@@ -351,13 +349,15 @@
                 xaxis: { 
                     gridcolor: '#334155',
                     type: 'date',
+                    // 【修改 2】強制設定 X 軸 (橫軸) 標籤也統一為數字格式 (YYYY-MM-DD)
+                    tickformat: '%Y-%m-%d',
                     range: [rangeStart, rangeEnd], 
                     rangeslider: { visible: true, bgcolor: '#0f172a' }
                 },
                 yaxis: { gridcolor: '#334155' },
                 title: 'TAIEX 市場位階聚類分析結果',
-                hovermode: 'x unified',
-                // 強制將 hover 提示框背景改為深色，字體改為白色
+                // 【修改 3】將 hovermode 改為 'closest'，避免系統自動在最上方額外產生統一日期標題
+                hovermode: 'closest', 
                 hoverlabel: {
                     bgcolor: '#1e293b', 
                     bordercolor: '#38bdf8',
