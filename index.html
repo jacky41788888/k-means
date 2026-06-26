@@ -62,9 +62,44 @@
             margin-bottom: 20px;
             font-size: 0.9rem;
         }
+        .input-panel {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #334155;
+        }
+        .input-panel input {
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #475569;
+            background: var(--bg-color);
+            color: var(--text-primary);
+            font-size: 1rem;
+        }
+        .input-panel button {
+            padding: 10px 20px;
+            border-radius: 6px;
+            border: none;
+            background: var(--accent);
+            color: #0f172a;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-size: 1rem;
+        }
+        .input-panel button:hover {
+            background: #0284c7;
+            color: #fff;
+        }
         #chart {
             width: 100%;
-            height: 700px; /* 稍微加高以容納下方時間拉桿 */
+            height: 700px;
             background: var(--card-bg);
             border-radius: 16px;
             box-shadow: 0 10px 25px rgba(0,0,0,0.3);
@@ -90,7 +125,7 @@
 
     <header>
         <h1>TAIEX 市場位階分析</h1>
-        <p>基於 K-Means 演算法之自動聚類系統 (完整歷史數據)</p>
+        <p>基於 K-Means 演算法之自動聚類系統 (完整歷史數據 + 自訂擴充)</p>
     </header>
 
     <div class="status-card" id="statusBox">
@@ -98,11 +133,25 @@
         <span id="statusText">正在處理全歷史數據並進行機器學習運算，請稍候...</span>
     </div>
 
+    <div class="input-panel">
+        <label for="inputDate">日期：</label>
+        <input type="date" id="inputDate" value="2026-06-26">
+        
+        <label for="inputClose">指數價格：</label>
+        <input type="number" id="inputClose" placeholder="例如：23000">
+        
+        <label for="inputVolume">成交量：</label>
+        <input type="number" id="inputVolume" placeholder="例如：400000000000">
+        
+        <button onclick="addCustomData()">加入數據並重新分析</button>
+    </div>
+
     <div id="chart"></div>
 </div>
 
 <script>
     const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRv5-oA8DNbp3N-TlBwmdG63ZBqdzw1wBJZiAy9x-T6eNIec-dzoGvF4gP2rnn25eIEs_kodTDnORTC/pub?output=csv';
+    let globalRawData = []; // 用於儲存合併後的原始資料
 
     function calculateMA(data, period) {
         let ma = new Array(data.length).fill(null);
@@ -200,121 +249,113 @@
         return clusters;
     }
 
-    Papa.parse(CSV_URL, {
-        download: true,
-        header: true,
-        dynamicTyping: false, 
-        complete: function(results) {
-            try {
-                let df = results.data.filter(row => row.date && row.close);
-                
-                // 【修復 1】：強制按日期進行升冪排序 (舊 -> 新)，解決年份顛倒問題
-                df.sort((a, b) => new Date(a.date) - new Date(b.date));
+    // 處理資料並繪圖的核心主函數
+    function processDataAndPlot(rawData) {
+        try {
+            document.getElementById('loader').style.display = 'inline-block';
+            document.getElementById('statusText').innerText = "正在進行機器學習運算，請稍候...";
+            
+            // 複製一份資料進行排序，強制按日期進行升冪排序
+            let df = [...rawData];
+            df.sort((a, b) => new Date(a.date) - new Date(b.date));
 
-                const close = df.map(r => parseFloat(String(r.close).replace(/,/g, '')));
-                const volume = df.map(r => {
-                    let val = (r.trading_money !== undefined && r.trading_money !== '') ? r.trading_money : r.trading_volume;
-                    return parseFloat(String(val).replace(/,/g, ''));
-                });
-                
-                const ma10 = calculateMA(close, 10);
-                const ma20 = calculateMA(close, 20);
-                const volMa10 = calculateMA(volume, 10);
-                const volMa20 = calculateMA(volume, 20);
-                
-                const bias10 = close.map((v, i) => ma10[i] ? (v - ma10[i]) / ma10[i] : null);
-                const bias20 = close.map((v, i) => ma20[i] ? (v - ma20[i]) / ma20[i] : null);
-                const vol10 = calculateVolatility(close, 10);
-                const vol20 = calculateVolatility(close, 20);
-                const ratio10 = volume.map((v, i) => volMa10[i] ? v / volMa10[i] : null);
-                const ratio20 = volume.map((v, i) => volMa20[i] ? v / volMa20[i] : null);
+            const close = df.map(r => parseFloat(String(r.close).replace(/,/g, '')));
+            const volume = df.map(r => {
+                let val = (r.trading_money !== undefined && r.trading_money !== '') ? r.trading_money : r.trading_volume;
+                return parseFloat(String(val).replace(/,/g, ''));
+            });
+            
+            const ma10 = calculateMA(close, 10);
+            const ma20 = calculateMA(close, 20);
+            const volMa10 = calculateMA(volume, 10);
+            const volMa20 = calculateMA(volume, 20);
+            
+            const bias10 = close.map((v, i) => ma10[i] ? (v - ma10[i]) / ma10[i] : null);
+            const bias20 = close.map((v, i) => ma20[i] ? (v - ma20[i]) / ma20[i] : null);
+            const vol10 = calculateVolatility(close, 10);
+            const vol20 = calculateVolatility(close, 20);
+            const ratio10 = volume.map((v, i) => volMa10[i] ? v / volMa10[i] : null);
+            const ratio20 = volume.map((v, i) => volMa20[i] ? v / volMa20[i] : null);
 
-                let finalDf = [];
-                let X = [];
-                for (let i = 0; i < df.length; i++) {
-                    if (bias20[i] !== null && !isNaN(bias20[i]) && !isNaN(vol20[i]) && !isNaN(ratio20[i])) {
-                        const feat = [bias10[i], bias20[i], vol10[i], vol20[i], ratio10[i], ratio20[i]];
-                        X.push(feat);
-                        finalDf.push({...df[i], close: close[i], feat: feat});
-                    }
+            let finalDf = [];
+            let X = [];
+            for (let i = 0; i < df.length; i++) {
+                if (bias20[i] !== null && !isNaN(bias20[i]) && !isNaN(vol20[i]) && !isNaN(ratio20[i])) {
+                    const feat = [bias10[i], bias20[i], vol10[i], vol20[i], ratio10[i], ratio20[i]];
+                    X.push(feat);
+                    finalDf.push({...df[i], close: close[i], feat: feat});
                 }
-
-                if (X.length < 5) throw new Error("有效數據不足，無法執行 K-Means 分析。");
-
-                const scaledX = standardize(X);
-                const allClusters = runKMeans(scaledX, 5);
-                
-                let clusterStats = [0,1,2,3,4].map(c => {
-                    let subset = X.filter((_, i) => allClusters[i] === c);
-                    let avgBias = subset.length > 0 ? subset.reduce((a, b) => a + b[1], 0) / subset.length : -999;
-                    return { id: c, avgBias: avgBias };
-                }).sort((a, b) => b.avgBias - a.avgBias);
-
-                const regimeMap = {
-                    [clusterStats[0].id]: { name: 'Extreme_Sell', color: '#008000' },
-                    [clusterStats[1].id]: { name: 'Sell_Zone', color: '#90EE90' },
-                    [clusterStats[2].id]: { name: 'Wait_Zone', color: '#A6A6A6' },
-                    [clusterStats[3].id]: { name: 'Buy_Zone', color: '#FFB6C1' },
-                    [clusterStats[4].id]: { name: 'Extreme_Buy', color: '#FF0000' }
-                };
-
-                // 【升級】：載入所有數據，不切割 slice
-                const plotData = finalDf;
-                const plotClusters = allClusters;
-
-                let traces = Object.keys(regimeMap).map(cid => {
-                    let subset = plotData.filter((_, i) => plotClusters[i] == cid);
-                    return {
-                        x: subset.map(d => d.date),
-                        y: subset.map(d => d.close),
-                        mode: 'markers',
-                        name: regimeMap[cid].name,
-                        marker: { color: regimeMap[cid].color, size: 6 } // 點微調小一點，讓長期走勢更清晰
-                    };
-                });
-
-                traces.push({
-                    x: plotData.map(d => d.date),
-                    y: plotData.map(d => d.close),
-                    mode: 'lines',
-                    name: 'TAIEX Close',
-                    line: { color: 'rgba(255,255,255,0.2)', width: 1 }
-                });
-
-                Plotly.newPlot('chart', traces, {
-                    paper_bgcolor: 'rgba(0,0,0,0)',
-                    plot_bgcolor: 'rgba(0,0,0,0)',
-                    font: { color: '#fff' },
-                    margin: { t: 50, r: 30, l: 60, b: 50 },
-                    // 【升級】：加入互動式時間拉桿，並確保 X 軸辨識為日期
-                    xaxis: { 
-                        gridcolor: '#334155',
-                        type: 'date',
-                        rangeslider: { visible: true, bgcolor: '#0f172a' }
-                    },
-                    yaxis: { gridcolor: '#334155' },
-                    title: 'TAIEX 市場位階聚類分析結果 (完整歷史)',
-                    hovermode: 'x unified'
-                });
-
-                document.getElementById('statusBox').style.borderColor = '#10b981';
-                document.getElementById('statusText').innerText = `分析完成：成功處理全歷史共 ${finalDf.length} 筆交易日數據！可用下方拉桿縮放時間。`;
-                document.getElementById('loader').style.display = 'none';
-
-            } catch (err) {
-                document.getElementById('statusText').innerText = "分析出錯: " + err.message;
-                document.getElementById('loader').style.display = 'none';
-                document.getElementById('statusBox').style.borderColor = '#ef4444';
-                console.error(err);
             }
-        },
-        error: function(err) {
-            document.getElementById('statusText').innerText = "讀取資料失敗，請檢查網路連線。";
-            document.getElementById('loader').style.display = 'none';
-            document.getElementById('statusBox').style.borderColor = '#ef4444';
-        }
-    });
-</script>
 
-</body>
-</html>
+            if (X.length < 5) throw new Error("有效數據不足，無法執行 K-Means 分析。");
+
+            const scaledX = standardize(X);
+            const allClusters = runKMeans(scaledX, 5);
+            
+            let clusterStats = [0,1,2,3,4].map(c => {
+                let subset = X.filter((_, i) => allClusters[i] === c);
+                let avgBias = subset.length > 0 ? subset.reduce((a, b) => a + b[1], 0) / subset.length : -999;
+                return { id: c, avgBias: avgBias };
+            }).sort((a, b) => b.avgBias - a.avgBias);
+
+            const regimeMap = {
+                [clusterStats[0].id]: { name: 'Extreme_Sell', color: '#008000' },
+                [clusterStats[1].id]: { name: 'Sell_Zone', color: '#90EE90' },
+                [clusterStats[2].id]: { name: 'Wait_Zone', color: '#A6A6A6' },
+                [clusterStats[3].id]: { name: 'Buy_Zone', color: '#FFB6C1' },
+                [clusterStats[4].id]: { name: 'Extreme_Buy', color: '#FF0000' }
+            };
+
+            const plotData = finalDf;
+            const plotClusters = allClusters;
+
+            let traces = Object.keys(regimeMap).map(cid => {
+                let subset = plotData.filter((_, i) => plotClusters[i] == cid);
+                return {
+                    x: subset.map(d => d.date),
+                    y: subset.map(d => d.close),
+                    mode: 'markers',
+                    name: regimeMap[cid].name,
+                    marker: { color: regimeMap[cid].color, size: 6 }
+                };
+            });
+
+            traces.push({
+                x: plotData.map(d => d.date),
+                y: plotData.map(d => d.close),
+                mode: 'lines',
+                name: 'TAIEX Close',
+                line: { color: 'rgba(255,255,255,0.2)', width: 1 }
+            });
+
+            // 計算預設顯示範圍：近一年
+            const latestDateString = plotData[plotData.length - 1].date;
+            const latestDate = new Date(latestDateString);
+            const oneYearAgo = new Date(latestDate);
+            oneYearAgo.setFullYear(latestDate.getFullYear() - 1);
+
+            const rangeStart = oneYearAgo.toISOString().split('T')[0];
+            const rangeEnd = latestDate.toISOString().split('T')[0];
+
+            Plotly.newPlot('chart', traces, {
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                font: { color: '#fff' },
+                margin: { t: 50, r: 30, l: 60, b: 50 },
+                xaxis: { 
+                    gridcolor: '#334155',
+                    type: 'date',
+                    range: [rangeStart, rangeEnd], // 設定預設顯示為近一年
+                    rangeslider: { visible: true, bgcolor: '#0f172a' }
+                },
+                yaxis: { gridcolor: '#334155' },
+                title: 'TAIEX 市場位階聚類分析結果',
+                hovermode: 'x unified'
+            });
+
+            document.getElementById('statusBox').style.borderColor = '#10b981';
+            document.getElementById('statusText').innerText = `分析完成：已處理 ${finalDf.length} 筆交易日數據。預設顯示近一年數據，可使用下方拉桿縮放查看全歷史。`;
+            document.getElementById('loader').style.display = 'none';
+
+        } catch (err) {
+            document.getElementById('statusText').
