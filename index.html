@@ -150,8 +150,9 @@
 </div>
 
 <script>
+    // 已經更新為您指定的網址
     const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRv5-oA8DNbp3N-TlBwmdG63ZBqdzw1wBJZiAy9x-T6eNIec-dzoGvF4gP2rnn25eIEs_kodTDnORTC/pub?output=csv';
-    let globalRawData = []; // 用於儲存合併後的原始資料
+    let globalRawData = []; 
 
     function calculateMA(data, period) {
         let ma = new Array(data.length).fill(null);
@@ -249,13 +250,11 @@
         return clusters;
     }
 
-    // 處理資料並繪圖的核心主函數
     function processDataAndPlot(rawData) {
         try {
             document.getElementById('loader').style.display = 'inline-block';
             document.getElementById('statusText').innerText = "正在進行機器學習運算，請稍候...";
             
-            // 複製一份資料進行排序，強制按日期進行升冪排序
             let df = [...rawData];
             df.sort((a, b) => new Date(a.date) - new Date(b.date));
 
@@ -328,7 +327,6 @@
                 line: { color: 'rgba(255,255,255,0.2)', width: 1 }
             });
 
-            // 計算預設顯示範圍：近一年
             const latestDateString = plotData[plotData.length - 1].date;
             const latestDate = new Date(latestDateString);
             const oneYearAgo = new Date(latestDate);
@@ -345,7 +343,7 @@
                 xaxis: { 
                     gridcolor: '#334155',
                     type: 'date',
-                    range: [rangeStart, rangeEnd], // 設定預設顯示為近一年
+                    range: [rangeStart, rangeEnd], 
                     rangeslider: { visible: true, bgcolor: '#0f172a' }
                 },
                 yaxis: { gridcolor: '#334155' },
@@ -358,4 +356,57 @@
             document.getElementById('loader').style.display = 'none';
 
         } catch (err) {
-            document.getElementById('statusText').
+            document.getElementById('statusText').innerText = "分析出錯: " + err.message;
+            document.getElementById('loader').style.display = 'none';
+            document.getElementById('statusBox').style.borderColor = '#ef4444';
+            console.error(err);
+        }
+    }
+
+    function addCustomData() {
+        const dateInput = document.getElementById('inputDate').value;
+        const closeInput = document.getElementById('inputClose').value;
+        const volumeInput = document.getElementById('inputVolume').value;
+
+        if (!dateInput || !closeInput || !volumeInput) {
+            alert("請完整輸入日期、指數價格與成交量！");
+            return;
+        }
+
+        globalRawData = globalRawData.filter(row => row.date !== dateInput);
+
+        globalRawData.push({
+            date: dateInput,
+            close: closeInput,
+            trading_volume: volumeInput, 
+            trading_money: volumeInput 
+        });
+
+        processDataAndPlot(globalRawData);
+    }
+
+    Papa.parse(CSV_URL, {
+        download: true,
+        header: true,
+        dynamicTyping: false, 
+        complete: function(results) {
+            globalRawData = results.data.filter(row => row.date && row.close);
+            
+            if (globalRawData.length === 0) {
+                 document.getElementById('statusText').innerText = "未能從連結讀取到有效的數據，請檢查表單欄位名稱是否正確。";
+                 document.getElementById('loader').style.display = 'none';
+                 document.getElementById('statusBox').style.borderColor = '#ef4444';
+                 return;
+            }
+            processDataAndPlot(globalRawData);
+        },
+        error: function(err) {
+            document.getElementById('statusText').innerText = "讀取資料失敗，請檢查網路連線或連結權限。";
+            document.getElementById('loader').style.display = 'none';
+            document.getElementById('statusBox').style.borderColor = '#ef4444';
+        }
+    });
+</script>
+
+</body>
+</html>
