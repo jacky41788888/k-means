@@ -150,7 +150,7 @@
 </div>
 
 <script>
-    // 已經更新為您指定的網址
+    // 讀取數據的網址已更新
     const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRv5-oA8DNbp3N-TlBwmdG63ZBqdzw1wBJZiAy9x-T6eNIec-dzoGvF4gP2rnn25eIEs_kodTDnORTC/pub?output=csv';
     let globalRawData = []; 
 
@@ -313,18 +313,26 @@
                 return {
                     x: subset.map(d => d.date),
                     y: subset.map(d => d.close),
+                    customdata: subset.map(d => {
+                        let vol = (d.trading_money !== undefined && d.trading_money !== '') ? d.trading_money : d.trading_volume;
+                        return parseFloat(String(vol).replace(/,/g, '')).toLocaleString();
+                    }),
                     mode: 'markers',
                     name: regimeMap[cid].name,
-                    marker: { color: regimeMap[cid].color, size: 6 }
+                    marker: { color: regimeMap[cid].color, size: 6 },
+                    // 明確顯示 日期、指數、成交量，加上 <extra></extra> 隱藏右側預設的 trace 名稱
+                    hovertemplate: '日期: %{x}<br>指數: %{y:,.0f}<br>成交量: %{customdata}<extra></extra>' 
                 };
             });
 
+            // 讓背景白線在 hover 時略過，避免出現兩筆重複資料
             traces.push({
                 x: plotData.map(d => d.date),
                 y: plotData.map(d => d.close),
                 mode: 'lines',
                 name: 'TAIEX Close',
-                line: { color: 'rgba(255,255,255,0.2)', width: 1 }
+                line: { color: 'rgba(255,255,255,0.2)', width: 1 },
+                hoverinfo: 'skip' 
             });
 
             const latestDateString = plotData[plotData.length - 1].date;
@@ -348,7 +356,13 @@
                 },
                 yaxis: { gridcolor: '#334155' },
                 title: 'TAIEX 市場位階聚類分析結果',
-                hovermode: 'x unified'
+                hovermode: 'x unified',
+                // 強制將 hover 提示框背景改為深色，字體改為白色
+                hoverlabel: {
+                    bgcolor: '#1e293b', 
+                    bordercolor: '#38bdf8',
+                    font: { color: '#ffffff', size: 14 }
+                }
             });
 
             document.getElementById('statusBox').style.borderColor = '#10b981';
