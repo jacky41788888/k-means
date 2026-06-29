@@ -140,8 +140,8 @@
         <label for="inputClose">指數價格：</label>
         <input type="number" id="inputClose" placeholder="例如：23000">
         
-        <label for="inputVolume">成交量：</label>
-        <input type="number" id="inputVolume" placeholder="例如：400000000000">
+        <label for="inputVolume">成交量 (億)：</label>
+        <input type="number" id="inputVolume" placeholder="例如：4000">
         
         <button onclick="addCustomData()">加入數據並重新分析</button>
     </div>
@@ -194,7 +194,6 @@
         return standardized;
     }
 
-    // --- 新增：偽隨機數生成器 (Mulberry32) ---
     function seededRandom(seed) {
         return function() {
             seed |= 0; seed = seed + 0x6D2B79F5 | 0;
@@ -204,7 +203,6 @@
         }
     }
 
-    // --- 更新：加入 n_init 與 random_state 機制的 runKMeans ---
     function runKMeans(data, k, maxIter = 100, n_init = 10, random_state = 42) {
         let bestClusters = null;
         let lowestInertia = Infinity;
@@ -321,8 +319,6 @@
             if (X.length < 5) throw new Error("有效數據不足，無法執行 K-Means 分析。");
 
             const scaledX = standardize(X);
-            
-            // 這裡呼叫 runKMeans 會自動使用預設的 n_init=10 與 random_state=42
             const allClusters = runKMeans(scaledX, 5); 
             
             let clusterStats = [0,1,2,3,4].map(c => {
@@ -412,20 +408,24 @@
     function addCustomData() {
         const dateInput = document.getElementById('inputDate').value;
         const closeInput = document.getElementById('inputClose').value;
-        const volumeInput = document.getElementById('inputVolume').value;
+        const rawVolumeInput = document.getElementById('inputVolume').value;
 
-        if (!dateInput || !closeInput || !volumeInput) {
+        if (!dateInput || !closeInput || !rawVolumeInput) {
             alert("請完整輸入日期、指數價格與成交量！");
             return;
         }
+
+        // 【修改】將輸入的「億」為單位的數值，乘上 100,000,000 轉回真實數值
+        const volumeInputInBillion = parseFloat(rawVolumeInput);
+        const actualVolume = volumeInputInBillion * 100000000;
 
         globalRawData = globalRawData.filter(row => row.date !== dateInput);
 
         globalRawData.push({
             date: dateInput,
-            close: closeInput,
-            trading_volume: volumeInput, 
-            trading_money: volumeInput 
+            close: parseFloat(closeInput),
+            trading_volume: actualVolume, 
+            trading_money: actualVolume 
         });
 
         processDataAndPlot(globalRawData);
