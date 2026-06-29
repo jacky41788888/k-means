@@ -194,59 +194,92 @@
         return standardized;
     }
 
-    function runKMeans(data, k, maxIter = 100) {
-        let centroids = [];
-        let indices = new Set();
-        while (centroids.length < k && indices.size < data.length) {
-            let idx = Math.floor(Math.random() * data.length);
-            if (!indices.has(idx)) {
-                indices.add(idx);
-                centroids.push([...data[idx]]);
-            }
+    // --- 新增：偽隨機數生成器 (Mulberry32) ---
+    function seededRandom(seed) {
+        return function() {
+            seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+            let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+            t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+            return ((t ^ t >>> 14) >>> 0) / 4294967296;
         }
-        
-        let clusters = new Array(data.length).fill(0);
-        
-        for (let iter = 0; iter < maxIter; iter++) {
-            let changed = false;
-            for (let i = 0; i < data.length; i++) {
-                let minDist = Infinity;
-                let minIdx = 0;
-                for (let j = 0; j < k; j++) {
-                    let dist = 0;
-                    for (let d = 0; d < data[0].length; d++) {
-                        dist += Math.pow(data[i][d] - centroids[j][d], 2);
-                    }
-                    if (dist < minDist) {
-                        minDist = dist;
-                        minIdx = j;
-                    }
-                }
-                if (clusters[i] !== minIdx) {
-                    clusters[i] = minIdx;
-                    changed = true;
+    }
+
+    // --- 更新：加入 n_init 與 random_state 機制的 runKMeans ---
+    function runKMeans(data, k, maxIter = 100, n_init = 10, random_state = 42) {
+        let bestClusters = null;
+        let lowestInertia = Infinity;
+
+        for (let init = 0; init < n_init; init++) {
+            let rng = seededRandom(random_state + init);
+            
+            let centroids = [];
+            let indices = new Set();
+            
+            while (centroids.length < k && indices.size < data.length) {
+                let idx = Math.floor(rng() * data.length);
+                if (!indices.has(idx)) {
+                    indices.add(idx);
+                    centroids.push([...data[idx]]);
                 }
             }
-            if (!changed) break;
             
-            let sums = Array.from({length: k}, () => new Array(data[0].length).fill(0));
-            let counts = new Array(k).fill(0);
+            let clusters = new Array(data.length).fill(0);
+            
+            for (let iter = 0; iter < maxIter; iter++) {
+                let changed = false;
+                for (let i = 0; i < data.length; i++) {
+                    let minDist = Infinity;
+                    let minIdx = 0;
+                    for (let j = 0; j < k; j++) {
+                        let dist = 0;
+                        for (let d = 0; d < data[0].length; d++) {
+                            dist += Math.pow(data[i][d] - centroids[j][d], 2);
+                        }
+                        if (dist < minDist) {
+                            minDist = dist;
+                            minIdx = j;
+                        }
+                    }
+                    if (clusters[i] !== minIdx) {
+                        clusters[i] = minIdx;
+                        changed = true;
+                    }
+                }
+                if (!changed) break;
+                
+                let sums = Array.from({length: k}, () => new Array(data[0].length).fill(0));
+                let counts = new Array(k).fill(0);
+                for (let i = 0; i < data.length; i++) {
+                    let c = clusters[i];
+                    counts[c]++;
+                    for (let d = 0; d < data[0].length; d++) {
+                        sums[c][d] += data[i][d];
+                    }
+                }
+                for (let j = 0; j < k; j++) {
+                    if (counts[j] > 0) {
+                        for (let d = 0; d < data[0].length; d++) {
+                            centroids[j][d] = sums[j][d] / counts[j];
+                        }
+                    }
+                }
+            }
+
+            let currentInertia = 0;
             for (let i = 0; i < data.length; i++) {
                 let c = clusters[i];
-                counts[c]++;
                 for (let d = 0; d < data[0].length; d++) {
-                    sums[c][d] += data[i][d];
+                    currentInertia += Math.pow(data[i][d] - centroids[c][d], 2);
                 }
             }
-            for (let j = 0; j < k; j++) {
-                if (counts[j] > 0) {
-                    for (let d = 0; d < data[0].length; d++) {
-                        centroids[j][d] = sums[j][d] / counts[j];
-                    }
-                }
+
+            if (currentInertia < lowestInertia) {
+                lowestInertia = currentInertia;
+                bestClusters = [...clusters];
             }
         }
-        return clusters;
+        
+        return bestClusters;
     }
 
     function processDataAndPlot(rawData) {
@@ -288,7 +321,9 @@
             if (X.length < 5) throw new Error("有效數據不足，無法執行 K-Means 分析。");
 
             const scaledX = standardize(X);
-            const allClusters = runKMeans(scaledX, 5);
+            
+            // 這裡呼叫 runKMeans 會自動使用預設的 n_init=10 與 random_state=42
+            const allClusters = runKMeans(scaledX, 5); 
             
             let clusterStats = [0,1,2,3,4].map(c => {
                 let subset = X.filter((_, i) => allClusters[i] === c);
@@ -319,7 +354,6 @@
                     mode: 'markers',
                     name: regimeMap[cid].name,
                     marker: { color: regimeMap[cid].color, size: 6 },
-                    // 【修改 1】使用 %{x|%Y-%m-%d} 強制設定提示框的日期顯示格式為純數字 (如 2026-06-26)
                     hovertemplate: '日期: %{x|%Y-%m-%d}<br>指數: %{y:,.0f}<br>成交量: %{customdata}<extra></extra>' 
                 };
             });
@@ -349,14 +383,12 @@
                 xaxis: { 
                     gridcolor: '#334155',
                     type: 'date',
-                    // 【修改 2】強制設定 X 軸 (橫軸) 標籤也統一為數字格式 (YYYY-MM-DD)
                     tickformat: '%Y-%m-%d',
                     range: [rangeStart, rangeEnd], 
                     rangeslider: { visible: true, bgcolor: '#0f172a' }
                 },
                 yaxis: { gridcolor: '#334155' },
                 title: 'TAIEX 市場位階聚類分析結果',
-                // 【修改 3】將 hovermode 改為 'closest'，避免系統自動在最上方額外產生統一日期標題
                 hovermode: 'closest', 
                 hoverlabel: {
                     bgcolor: '#1e293b', 
