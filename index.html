@@ -194,6 +194,7 @@
         return standardized;
     }
 
+    // 偽隨機數生成器 (Mulberry32)，確保每次重整的隨機序列一致
     function seededRandom(seed) {
         return function() {
             seed |= 0; seed = seed + 0x6D2B79F5 | 0;
@@ -203,6 +204,7 @@
         }
     }
 
+    // 加入 n_init 與 random_state 機制的 K-Means 演算法
     function runKMeans(data, k, maxIter = 100, n_init = 10, random_state = 42) {
         let bestClusters = null;
         let lowestInertia = Infinity;
@@ -393,6 +395,43 @@
                 }
             });
 
+            // === 動態調整 Y 軸範圍的事件監聽器 ===
+            const chartDiv = document.getElementById('chart');
+            chartDiv.on('plotly_relayout', function(eventData) {
+                if (eventData['xaxis.range[0]'] || eventData['xaxis.range']) {
+                    let xStart = eventData['xaxis.range[0]'] || eventData['xaxis.range'][0];
+                    let xEnd = eventData['xaxis.range[1]'] || eventData['xaxis.range'][1];
+                    
+                    let startTime = new Date(xStart).getTime();
+                    let endTime = new Date(xEnd).getTime();
+
+                    let minY = Infinity;
+                    let maxY = -Infinity;
+
+                    plotData.forEach(d => {
+                        let dTime = new Date(d.date).getTime();
+                        if (dTime >= startTime && dTime <= endTime) {
+                            if (d.close < minY) minY = d.close;
+                            if (d.close > maxY) maxY = d.close;
+                        }
+                    });
+
+                    if (minY !== Infinity && maxY !== -Infinity) {
+                        let padding = (maxY - minY) * 0.05; 
+                        if (padding === 0) padding = minY * 0.01; 
+                        
+                        Plotly.relayout(chartDiv, {
+                            'yaxis.range': [minY - padding, maxY + padding]
+                        });
+                    }
+                } 
+                else if (eventData['xaxis.autorange'] || eventData['autorange']) {
+                    Plotly.relayout(chartDiv, {
+                        'yaxis.autorange': true
+                    });
+                }
+            });
+
             document.getElementById('statusBox').style.borderColor = '#10b981';
             document.getElementById('statusText').innerText = `分析完成：已處理 ${finalDf.length} 筆交易日數據。預設顯示近一年數據，可使用下方拉桿縮放查看全歷史。`;
             document.getElementById('loader').style.display = 'none';
@@ -415,7 +454,7 @@
             return;
         }
 
-        // 【修改】將輸入的「億」為單位的數值，乘上 100,000,000 轉回真實數值
+        // 將輸入的「億」為單位的數值，轉換回真實運算數值
         const volumeInputInBillion = parseFloat(rawVolumeInput);
         const actualVolume = volumeInputInBillion * 100000000;
 
