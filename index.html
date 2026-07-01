@@ -456,7 +456,7 @@
 
         // 將輸入的「億」為單位的數值，轉換回真實運算數值
         const volumeInputInBillion = parseFloat(rawVolumeInput);
-        const actualVolume = volumeInputInBillion * 100000000;
+        const actualVolume = (volumeInputInBillion/0.95) * 100000000;
 
         globalRawData = globalRawData.filter(row => row.date !== dateInput);
 
