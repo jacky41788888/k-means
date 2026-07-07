@@ -375,13 +375,26 @@
                 hoverinfo: 'skip'
             });
 
-            const latestDateString = plotData[plotData.length - 1].date;
-            const latestDate = new Date(latestDateString);
-            const oneYearAgo = new Date(latestDate);
-            oneYearAgo.setFullYear(latestDate.getFullYear() - 1);
+           const latestDateString = plotData[plotData.length - 1].date;
+const latestDate = new Date(latestDateString);
 
-            const rangeStart = oneYearAgo.toISOString().split('T')[0];
-            const rangeEnd = latestDate.toISOString().split('T')[0];
+const oneYearAgo = new Date(latestDate);
+oneYearAgo.setFullYear(latestDate.getFullYear() - 1);
+
+// 加上 2 天的視覺緩衝，讓最新的圓點不會緊貼右側邊緣
+const endDisplayDate = new Date(latestDate);
+endDisplayDate.setDate(endDisplayDate.getDate() + 2); 
+
+// 自訂日期格式化，避免 toISOString() 造成的時區位移問題
+const formatDate = (dateObj) => {
+    const y = dateObj.getFullYear();
+    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const d = String(dateObj.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+};
+
+const rangeStart = formatDate(oneYearAgo);
+const rangeEnd = formatDate(endDisplayDate);
 
             Plotly.newPlot('chart', traces, {
                 paper_bgcolor: 'rgba(0,0,0,0)',
