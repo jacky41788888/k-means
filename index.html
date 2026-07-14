@@ -153,7 +153,7 @@
 </div>
 
 <script>
-// 取得當天日期並設定為預設值
+    // 取得當天日期並設定為預設值
     const today = new Date();
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth() + 1).padStart(2, '0');
@@ -306,8 +306,12 @@
                 return parseFloat(String(val).replace(/,/g, ''));
             });
             
+            const ma5 = calculateMA(close, 5);
             const ma10 = calculateMA(close, 10);
             const ma20 = calculateMA(close, 20);
+            const ma60 = calculateMA(close, 60);
+            const ma120 = calculateMA(close, 120);
+            
             const volMa10 = calculateMA(volume, 10);
             const volMa20 = calculateMA(volume, 20);
             
@@ -324,7 +328,16 @@
                 if (bias20[i] !== null && !isNaN(bias20[i]) && !isNaN(vol20[i]) && !isNaN(ratio20[i])) {
                     const feat = [bias10[i], bias20[i], vol10[i], vol20[i], ratio10[i], ratio20[i]];
                     X.push(feat);
-                    finalDf.push({...df[i], close: close[i], feat: feat});
+                    finalDf.push({
+                        ...df[i], 
+                        close: close[i], 
+                        ma5: ma5[i],
+                        ma10: ma10[i],
+                        ma20: ma20[i],
+                        ma60: ma60[i],
+                        ma120: ma120[i],
+                        feat: feat
+                    });
                 }
             }
 
@@ -366,6 +379,54 @@
                 };
             });
 
+            // 加入均線的 Traces
+            traces.push({
+                x: plotData.map(d => d.date),
+                y: plotData.map(d => d.ma5),
+                mode: 'lines',
+                name: '5MA',
+                line: { color: '#f59e0b', width: 1.2 },
+                visible: 'legendonly', // 預設隱藏
+                hoverinfo: 'skip'
+            });
+            traces.push({
+                x: plotData.map(d => d.date),
+                y: plotData.map(d => d.ma10),
+                mode: 'lines',
+                name: '10MA',
+                line: { color: '#84cc16', width: 1.2 },
+                visible: 'legendonly', // 預設隱藏
+                hoverinfo: 'skip'
+            });
+            traces.push({
+                x: plotData.map(d => d.date),
+                y: plotData.map(d => d.ma20),
+                mode: 'lines',
+                name: '20MA',
+                line: { color: '#06b6d4', width: 1.2 },
+                visible: true, // 預設顯示
+                hoverinfo: 'skip'
+            });
+            traces.push({
+                x: plotData.map(d => d.date),
+                y: plotData.map(d => d.ma60),
+                mode: 'lines',
+                name: '60MA',
+                line: { color: '#3b82f6', width: 1.2 },
+                visible: true, // 預設顯示
+                hoverinfo: 'skip'
+            });
+            traces.push({
+                x: plotData.map(d => d.date),
+                y: plotData.map(d => d.ma120),
+                mode: 'lines',
+                name: '120MA',
+                line: { color: '#8b5cf6', width: 1.2 },
+                visible: true, // 預設顯示
+                hoverinfo: 'skip'
+            });
+
+            // 原始指數折線
             traces.push({
                 x: plotData.map(d => d.date),
                 y: plotData.map(d => d.close),
@@ -375,26 +436,26 @@
                 hoverinfo: 'skip'
             });
 
-           const latestDateString = plotData[plotData.length - 1].date;
-const latestDate = new Date(latestDateString);
+            const latestDateString = plotData[plotData.length - 1].date;
+            const latestDate = new Date(latestDateString);
 
-const oneYearAgo = new Date(latestDate);
-oneYearAgo.setFullYear(latestDate.getFullYear() - 1);
+            const oneYearAgo = new Date(latestDate);
+            oneYearAgo.setFullYear(latestDate.getFullYear() - 1);
 
-// 加上 2 天的視覺緩衝，讓最新的圓點不會緊貼右側邊緣
-const endDisplayDate = new Date(latestDate);
-endDisplayDate.setDate(endDisplayDate.getDate() + 2); 
+            // 加上 2 天的視覺緩衝，讓最新的圓點不會緊貼右側邊緣
+            const endDisplayDate = new Date(latestDate);
+            endDisplayDate.setDate(endDisplayDate.getDate() + 2); 
 
-// 自訂日期格式化，避免 toISOString() 造成的時區位移問題
-const formatDate = (dateObj) => {
-    const y = dateObj.getFullYear();
-    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
-    const d = String(dateObj.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-};
+            // 自訂日期格式化，避免 toISOString() 造成的時區位移問題
+            const formatDate = (dateObj) => {
+                const y = dateObj.getFullYear();
+                const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+                const d = String(dateObj.getDate()).padStart(2, '0');
+                return `${y}-${m}-${d}`;
+            };
 
-const rangeStart = formatDate(oneYearAgo);
-const rangeEnd = formatDate(endDisplayDate);
+            const rangeStart = formatDate(oneYearAgo);
+            const rangeEnd = formatDate(endDisplayDate);
 
             Plotly.newPlot('chart', traces, {
                 paper_bgcolor: 'rgba(0,0,0,0)',
@@ -409,7 +470,7 @@ const rangeEnd = formatDate(endDisplayDate);
                     rangeslider: { visible: true, bgcolor: '#0f172a' }
                 },
                 yaxis: { gridcolor: '#334155' },
-                title: 'TAIEX 市場位階聚類分析結果',
+                title: 'TAIEX 市場位階聚類分析結果 (含均線)',
                 hovermode: 'closest', 
                 hoverlabel: {
                     bgcolor: '#1e293b', 
@@ -418,7 +479,7 @@ const rangeEnd = formatDate(endDisplayDate);
                 }
             });
 
-            // === 動態調整 Y 軸範圍的事件監聽器 ===
+            // === 動態調整 Y 軸範圍的事件監聽器 (加入均線判斷) ===
             const chartDiv = document.getElementById('chart');
             chartDiv.on('plotly_relayout', function(eventData) {
                 if (eventData['xaxis.range[0]'] || eventData['xaxis.range']) {
@@ -434,8 +495,18 @@ const rangeEnd = formatDate(endDisplayDate);
                     plotData.forEach(d => {
                         let dTime = new Date(d.date).getTime();
                         if (dTime >= startTime && dTime <= endTime) {
-                            if (d.close < minY) minY = d.close;
-                            if (d.close > maxY) maxY = d.close;
+                            let yValues = [d.close];
+                            if (d.ma5 !== null) yValues.push(d.ma5);
+                            if (d.ma10 !== null) yValues.push(d.ma10);
+                            if (d.ma20 !== null) yValues.push(d.ma20);
+                            if (d.ma60 !== null) yValues.push(d.ma60);
+                            if (d.ma120 !== null) yValues.push(d.ma120);
+
+                            let localMin = Math.min(...yValues);
+                            let localMax = Math.max(...yValues);
+
+                            if (localMin < minY) minY = localMin;
+                            if (localMax > maxY) maxY = localMax;
                         }
                     });
 
