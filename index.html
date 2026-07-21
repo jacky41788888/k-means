@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TAIEX K-Means Clustering Dashboard</title>
+    <title>TAIEX K-Means Clustering & Panic Score Dashboard</title>
     <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
@@ -124,8 +124,8 @@
     <a href="https://jacky41788888.github.io/web/" class="nav-link">&larr; 返回首頁</a>
 
     <header>
-        <h1>TAIEX 市場位階分析</h1>
-        <p>基於 K-Means 演算法之自動聚類系統 (完整歷史數據 + 自訂擴充)</p>
+        <h1>TAIEX 市場位階與恐慌分數分析</h1>
+        <p>基於 K-Means 演算法位階聚類 + 動態恐慌分數柱狀圖系統</p>
         <div style="margin-top: 15px;">
             <img src="https://hits.sh/jacky41788888.github.io/web/taiex.svg?style=for-the-badge&label=瀏覽次數&color=38bdf8&labelColor=1e293b" alt="網頁瀏覽計數">
         </div>
@@ -133,7 +133,7 @@
 
     <div class="status-card" id="statusBox">
         <div class="loader" id="loader"></div>
-        <span id="statusText">正在處理全歷史數據並進行機器學習運算，請稍候...</span>
+        <span id="statusText">正在處理全歷史數據並進行機器學習運算與恐慌分數計算，請稍候...</span>
     </div>
 
     <div class="input-panel">
@@ -187,6 +187,43 @@
         return vol;
     }
 
+    // 計算恐慌分數 (0 - 100)
+    function calculatePanicScore(close, ma20, vol20, volume, volMa20) {
+        let rawScores = [];
+        for (let i = 0; i < close.length; i++) {
+            if (!ma20[i] || !vol20[i] || !volMa20[i]) {
+                rawScores.push(null);
+                continue;
+            }
+            let bias20Val = (close[i] - ma20[i]) / ma20[i];
+            let negBias = Math.max(0, -bias20Val); // 下跌乖離越深，恐慌越高
+            let vol20Val = vol20[i];
+            let ratio20Val = volume[i] / volMa20[i];
+            let volMult = (bias20Val < 0) ? ratio20Val : 1.0; // 下跌時放大成交量權重
+            
+            let score = (negBias * 250) + (vol20Val * 200) + (volMult > 1 ? (volMult - 1) * 10 : 0);
+            rawScores.push(score);
+        }
+
+        let valid = rawScores.filter(s => s !== null).sort((a, b) => a - b);
+        if (valid.length === 0) return new Array(close.length).fill(0);
+
+        let p5 = valid[Math.floor(valid.length * 0.05)] || valid[0];
+        let p95 = valid[Math.floor(valid.length * 0.95)] || valid[valid.length - 1];
+
+        let panicScores = [];
+        for (let i = 0; i < close.length; i++) {
+            if (rawScores[i] === null) {
+                panicScores.push(0);
+            } else {
+                let scaled = ((rawScores[i] - p5) / (p95 - p5)) * 100;
+                let clamped = Math.max(0, Math.min(100, scaled));
+                panicScores.push(Math.round(clamped * 10) / 10);
+            }
+        }
+        return panicScores;
+    }
+
     function standardize(features) {
         const n = features.length;
         const m = features[0].length;
@@ -204,7 +241,6 @@
         return standardized;
     }
 
-    // 偽隨機數生成器 (Mulberry32)，確保每次重整的隨機序列一致
     function seededRandom(seed) {
         return function() {
             seed |= 0; seed = seed + 0x6D2B79F5 | 0;
@@ -214,7 +250,6 @@
         }
     }
 
-    // 加入 n_init 與 random_state 機制的 K-Means 演算法
     function runKMeans(data, k, maxIter = 100, n_init = 10, random_state = 42) {
         let bestClusters = null;
         let lowestInertia = Infinity;
@@ -295,7 +330,7 @@
     function processDataAndPlot(rawData) {
         try {
             document.getElementById('loader').style.display = 'inline-block';
-            document.getElementById('statusText').innerText = "正在進行機器學習運算，請稍候...";
+            document.getElementById('statusText').innerText = "正在進行機器學習運算與恐慌分數計算，請稍候...";
             
             let df = [...rawData];
             df.sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -322,6 +357,9 @@
             const ratio10 = volume.map((v, i) => volMa10[i] ? v / volMa10[i] : null);
             const ratio20 = volume.map((v, i) => volMa20[i] ? v / volMa20[i] : null);
 
+            // 計算恐慌分數
+            const panicScores = calculatePanicScore(close, ma20, vol20, volume, volMa20);
+
             let finalDf = [];
             let X = [];
             for (let i = 0; i < df.length; i++) {
@@ -336,6 +374,7 @@
                         ma20: ma20[i],
                         ma60: ma60[i],
                         ma120: ma120[i],
+                        panicScore: panicScores[i],
                         feat: feat
                     });
                 }
@@ -370,23 +409,43 @@
                     y: subset.map(d => d.close),
                     customdata: subset.map(d => {
                         let vol = (d.trading_money !== undefined && d.trading_money !== '') ? d.trading_money : d.trading_volume;
-                        return parseFloat(String(vol).replace(/,/g, '')).toLocaleString();
+                        return {
+                            volStr: parseFloat(String(vol).replace(/,/g, '')).toLocaleString(),
+                            panic: d.panicScore
+                        };
                     }),
                     mode: 'markers',
                     name: regimeMap[cid].name,
                     marker: { color: regimeMap[cid].color, size: 6 },
-                    hovertemplate: '日期: %{x|%Y-%m-%d}<br>指數: %{y:,.0f}<br>成交量: %{customdata}<extra></extra>' 
+                    hovertemplate: '日期: %{x|%Y-%m-%d}<br>指數: %{y:,.0f}<br>成交量: %{customdata.volStr}<br>恐慌分數: %{customdata.panic:.1f}<extra></extra>' 
                 };
             });
 
-            // 加入均線的 Traces
+            // 加入恐慌分數柱狀圖 Trace (使用 yaxis2 右側雙 Y 軸)
+            traces.push({
+                x: plotData.map(d => d.date),
+                y: plotData.map(d => d.panicScore),
+                type: 'bar',
+                name: '恐慌分數',
+                yaxis: 'y2',
+                marker: {
+                    color: plotData.map(d => {
+                        if (d.panicScore >= 70) return 'rgba(239, 68, 68, 0.65)';  // 高恐慌 - 紅色
+                        if (d.panicScore >= 40) return 'rgba(245, 158, 11, 0.65)'; // 中恐慌 - 橘黃色
+                        return 'rgba(56, 189, 248, 0.45)';                         // 低恐慌 - 藍色
+                    })
+                },
+                hovertemplate: '日期: %{x|%Y-%m-%d}<br>恐慌分數: %{y:.1f}<extra></extra>'
+            });
+
+            // 加入均線 Trace
             traces.push({
                 x: plotData.map(d => d.date),
                 y: plotData.map(d => d.ma5),
                 mode: 'lines',
                 name: '5MA',
                 line: { color: '#f59e0b', width: 1.2 },
-                visible: 'legendonly', // 預設隱藏
+                visible: 'legendonly',
                 hoverinfo: 'skip'
             });
             traces.push({
@@ -395,7 +454,7 @@
                 mode: 'lines',
                 name: '10MA',
                 line: { color: '#84cc16', width: 1.2 },
-                visible: 'legendonly', // 預設隱藏
+                visible: 'legendonly',
                 hoverinfo: 'skip'
             });
             traces.push({
@@ -403,8 +462,8 @@
                 y: plotData.map(d => d.ma20),
                 mode: 'lines',
                 name: '20MA',
-                line: { color: '#a855f7', width: 1.2 }, // 紫色
-                visible: true, // 預設顯示
+                line: { color: '#a855f7', width: 1.2 },
+                visible: true,
                 hoverinfo: 'skip'
             });
             traces.push({
@@ -412,8 +471,8 @@
                 y: plotData.map(d => d.ma60),
                 mode: 'lines',
                 name: '60MA',
-                line: { color: '#ffffff', width: 1.2 }, // 白色
-                visible: true, // 預設顯示
+                line: { color: '#ffffff', width: 1.2 },
+                visible: true,
                 hoverinfo: 'skip'
             });
             traces.push({
@@ -421,8 +480,8 @@
                 y: plotData.map(d => d.ma120),
                 mode: 'lines',
                 name: '120MA',
-                line: { color: '#ff1493', width: 1.2 }, // 桃紅色
-                visible: true, // 預設顯示
+                line: { color: '#ff1493', width: 1.2 },
+                visible: true,
                 hoverinfo: 'skip'
             });
 
@@ -436,17 +495,16 @@
                 hoverinfo: 'skip'
             });
 
-            const latestDateString = plotData[plotData.length - 1].date;
+            const latestPoint = plotData[plotData.length - 1];
+            const latestDateString = latestPoint.date;
             const latestDate = new Date(latestDateString);
 
             const oneYearAgo = new Date(latestDate);
             oneYearAgo.setFullYear(latestDate.getFullYear() - 1);
 
-            // 加上 2 天的視覺緩衝，讓最新的圓點不會緊貼右側邊緣
             const endDisplayDate = new Date(latestDate);
             endDisplayDate.setDate(endDisplayDate.getDate() + 2); 
 
-            // 自訂日期格式化，避免 toISOString() 造成的時區位移問題
             const formatDate = (dateObj) => {
                 const y = dateObj.getFullYear();
                 const m = String(dateObj.getMonth() + 1).padStart(2, '0');
@@ -461,7 +519,7 @@
                 paper_bgcolor: 'rgba(0,0,0,0)',
                 plot_bgcolor: 'rgba(0,0,0,0)',
                 font: { color: '#fff' },
-                margin: { t: 50, r: 30, l: 60, b: 50 },
+                margin: { t: 50, r: 50, l: 60, b: 50 },
                 xaxis: { 
                     gridcolor: '#334155',
                     type: 'date',
@@ -469,8 +527,21 @@
                     range: [rangeStart, rangeEnd], 
                     rangeslider: { visible: true, bgcolor: '#0f172a' }
                 },
-                yaxis: { gridcolor: '#334155' },
-                title: 'TAIEX 市場位階聚類分析結果 (含均線)',
+                yaxis: { 
+                    gridcolor: '#334155',
+                    title: '加權指數'
+                },
+                yaxis2: {
+                    title: '恐慌分數 (0-100)',
+                    titlefont: { color: '#f59e0b' },
+                    tickfont: { color: '#f59e0b' },
+                    overlaying: 'y',
+                    side: 'right',
+                    range: [0, 200], // 0-200 讓柱狀圖維持在圖表下半部(0-100分占下半部)，不遮擋 K 線
+                    showgrid: false,
+                    zeroline: false
+                },
+                title: 'TAIEX 市場位階與恐慌分數分析圖表',
                 hovermode: 'closest', 
                 hoverlabel: {
                     bgcolor: '#1e293b', 
@@ -479,7 +550,7 @@
                 }
             });
 
-            // === 動態調整 Y 軸範圍的事件監聽器 (加入均線判斷) ===
+            // 動態調整 Y 軸範圍
             const chartDiv = document.getElementById('chart');
             chartDiv.on('plotly_relayout', function(eventData) {
                 if (eventData['xaxis.range[0]'] || eventData['xaxis.range']) {
@@ -527,7 +598,7 @@
             });
 
             document.getElementById('statusBox').style.borderColor = '#10b981';
-            document.getElementById('statusText').innerText = `分析完成：已處理 ${finalDf.length} 筆交易日數據。預設顯示近一年數據，可使用下方拉桿縮放查看全歷史。`;
+            document.getElementById('statusText').innerText = `分析完成：已處理 ${finalDf.length} 筆交易日數據。最新數據 (${latestPoint.date}) - 指數: ${latestPoint.close.toLocaleString()}，恐慌分數: ${latestPoint.panicScore}。`;
             document.getElementById('loader').style.display = 'none';
 
         } catch (err) {
@@ -548,7 +619,6 @@
             return;
         }
 
-        // 將輸入的「億」為單位的數值，轉換回真實運算數值
         const volumeInputInBillion = parseFloat(rawVolumeInput);
         const actualVolume = (volumeInputInBillion/0.95) * 100000000;
 
