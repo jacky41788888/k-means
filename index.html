@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TAIEX K-Means Clustering & Panic Score Dashboard</title>
+    <title>TAIEX K-Means Clustering Dashboard</title>
     <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
@@ -99,7 +99,7 @@
         }
         #chart {
             width: 100%;
-            height: 700px;
+            height: 850px;
             background: var(--card-bg);
             border-radius: 16px;
             box-shadow: 0 10px 25px rgba(0,0,0,0.3);
@@ -124,8 +124,8 @@
     <a href="https://jacky41788888.github.io/web/" class="nav-link">&larr; 返回首頁</a>
 
     <header>
-        <h1>TAIEX 市場位階與恐慌分數分析</h1>
-        <p>基於 K-Means 演算法位階聚類 + 動態恐慌分數柱狀圖系統</p>
+        <h1>TAIEX 市場位階與恐慌指標分析</h1>
+        <p>基於 K-Means 機器學習與恐慌向量 (Panic Vector) 投影之自動分析系統</p>
         <div style="margin-top: 15px;">
             <img src="https://hits.sh/jacky41788888.github.io/web/taiex.svg?style=for-the-badge&label=瀏覽次數&color=38bdf8&labelColor=1e293b" alt="網頁瀏覽計數">
         </div>
@@ -133,7 +133,7 @@
 
     <div class="status-card" id="statusBox">
         <div class="loader" id="loader"></div>
-        <span id="statusText">正在處理全歷史數據並進行機器學習運算與恐慌分數計算，請稍候...</span>
+        <span id="statusText">正在處理全歷史數據並進行機器學習與向量投影運算，請稍候...</span>
     </div>
 
     <div class="input-panel">
@@ -153,7 +153,7 @@
 </div>
 
 <script>
-    // 取得當天日期並設定為預設值
+    // 預設日期設定
     const today = new Date();
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth() + 1).padStart(2, '0');
@@ -185,43 +185,6 @@
             vol[i] = Math.sqrt(sqDiff.reduce((a, b) => a + b) / period);
         }
         return vol;
-    }
-
-    // 計算恐慌分數 (0 - 100)
-    function calculatePanicScore(close, ma20, vol20, volume, volMa20) {
-        let rawScores = [];
-        for (let i = 0; i < close.length; i++) {
-            if (!ma20[i] || !vol20[i] || !volMa20[i]) {
-                rawScores.push(null);
-                continue;
-            }
-            let bias20Val = (close[i] - ma20[i]) / ma20[i];
-            let negBias = Math.max(0, -bias20Val); // 下跌乖離越深，恐慌越高
-            let vol20Val = vol20[i];
-            let ratio20Val = volume[i] / volMa20[i];
-            let volMult = (bias20Val < 0) ? ratio20Val : 1.0; // 下跌時放大成交量權重
-            
-            let score = (negBias * 250) + (vol20Val * 200) + (volMult > 1 ? (volMult - 1) * 10 : 0);
-            rawScores.push(score);
-        }
-
-        let valid = rawScores.filter(s => s !== null).sort((a, b) => a - b);
-        if (valid.length === 0) return new Array(close.length).fill(0);
-
-        let p5 = valid[Math.floor(valid.length * 0.05)] || valid[0];
-        let p95 = valid[Math.floor(valid.length * 0.95)] || valid[valid.length - 1];
-
-        let panicScores = [];
-        for (let i = 0; i < close.length; i++) {
-            if (rawScores[i] === null) {
-                panicScores.push(0);
-            } else {
-                let scaled = ((rawScores[i] - p5) / (p95 - p5)) * 100;
-                let clamped = Math.max(0, Math.min(100, scaled));
-                panicScores.push(Math.round(clamped * 10) / 10);
-            }
-        }
-        return panicScores;
     }
 
     function standardize(features) {
@@ -256,7 +219,6 @@
 
         for (let init = 0; init < n_init; init++) {
             let rng = seededRandom(random_state + init);
-            
             let centroids = [];
             let indices = new Set();
             
@@ -330,7 +292,7 @@
     function processDataAndPlot(rawData) {
         try {
             document.getElementById('loader').style.display = 'inline-block';
-            document.getElementById('statusText').innerText = "正在進行機器學習運算與恐慌分數計算，請稍候...";
+            document.getElementById('statusText').innerText = "正在進行機器學習運算與恐慌向量投影計算...";
             
             let df = [...rawData];
             df.sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -357,9 +319,6 @@
             const ratio10 = volume.map((v, i) => volMa10[i] ? v / volMa10[i] : null);
             const ratio20 = volume.map((v, i) => volMa20[i] ? v / volMa20[i] : null);
 
-            // 計算恐慌分數
-            const panicScores = calculatePanicScore(close, ma20, vol20, volume, volMa20);
-
             let finalDf = [];
             let X = [];
             for (let i = 0; i < df.length; i++) {
@@ -374,7 +333,6 @@
                         ma20: ma20[i],
                         ma60: ma60[i],
                         ma120: ma120[i],
-                        panicScore: panicScores[i],
                         feat: feat
                     });
                 }
@@ -399,6 +357,45 @@
                 [clusterStats[4].id]: { name: 'Extreme_Buy', color: '#FF0000' }
             };
 
+            // 計算 C_normal 與 C_panic
+            const normalCid = clusterStats[2].id;
+            const panicCid = clusterStats[4].id;
+
+            let cNormal = new Array(6).fill(0);
+            let cPanic = new Array(6).fill(0);
+            let countNormal = 0, countPanic = 0;
+
+            for (let i = 0; i < scaledX.length; i++) {
+                if (allClusters[i] === normalCid) {
+                    for (let d = 0; d < 6; d++) cNormal[d] += scaledX[i][d];
+                    countNormal++;
+                } else if (allClusters[i] === panicCid) {
+                    for (let d = 0; d < 6; d++) cPanic[d] += scaledX[i][d];
+                    countPanic++;
+                }
+            }
+            if (countNormal > 0) cNormal = cNormal.map(v => v / countNormal);
+            if (countPanic > 0) cPanic = cPanic.map(v => v / countPanic);
+
+            // 恐慌單位向量
+            let vPanic = new Array(6);
+            let vPanicNormSq = 0;
+            for (let d = 0; d < 6; d++) {
+                vPanic[d] = cPanic[d] - cNormal[d];
+                vPanicNormSq += vPanic[d] * vPanic[d];
+            }
+            let vPanicNorm = Math.sqrt(vPanicNormSq);
+            let vPanicUnit = vPanic.map(v => vPanicNorm > 0 ? v / vPanicNorm : 0);
+
+            // 計算 Panic Score
+            for (let i = 0; i < finalDf.length; i++) {
+                let score = 0;
+                for (let d = 0; d < 6; d++) {
+                    score += (scaledX[i][d] - cNormal[d]) * vPanicUnit[d];
+                }
+                finalDf[i].panicScore = score;
+            }
+
             const plotData = finalDf;
             const plotClusters = allClusters;
 
@@ -409,139 +406,96 @@
                     y: subset.map(d => d.close),
                     customdata: subset.map(d => {
                         let vol = (d.trading_money !== undefined && d.trading_money !== '') ? d.trading_money : d.trading_volume;
-                        return {
-                            volStr: parseFloat(String(vol).replace(/,/g, '')).toLocaleString(),
-                            panic: d.panicScore
-                        };
+                        return parseFloat(String(vol).replace(/,/g, '')).toLocaleString();
                     }),
                     mode: 'markers',
                     name: regimeMap[cid].name,
+                    xaxis: 'x',
+                    yaxis: 'y',
                     marker: { color: regimeMap[cid].color, size: 6 },
-                    hovertemplate: '日期: %{x|%Y-%m-%d}<br>指數: %{y:,.0f}<br>成交量: %{customdata.volStr}<br>恐慌分數: %{customdata.panic:.1f}<extra></extra>' 
+                    hovertemplate: '日期: %{x}<br>指數: %{y:,.0f}<br>成交量: %{customdata}<extra></extra>' 
                 };
             });
 
-            // 加入恐慌分數柱狀圖 Trace (使用 yaxis2 右側雙 Y 軸)
+            // 均線 Traces
             traces.push({
-                x: plotData.map(d => d.date),
-                y: plotData.map(d => d.panicScore),
-                type: 'bar',
-                name: '恐慌分數',
-                yaxis: 'y2',
-                marker: {
-                    color: plotData.map(d => {
-                        if (d.panicScore >= 70) return 'rgba(239, 68, 68, 0.65)';  // 高恐慌 - 紅色
-                        if (d.panicScore >= 40) return 'rgba(245, 158, 11, 0.65)'; // 中恐慌 - 橘黃色
-                        return 'rgba(56, 189, 248, 0.45)';                         // 低恐慌 - 藍色
-                    })
-                },
-                hovertemplate: '日期: %{x|%Y-%m-%d}<br>恐慌分數: %{y:.1f}<extra></extra>'
-            });
-
-            // 加入均線 Trace
-            traces.push({
-                x: plotData.map(d => d.date),
-                y: plotData.map(d => d.ma5),
-                mode: 'lines',
-                name: '5MA',
-                line: { color: '#f59e0b', width: 1.2 },
-                visible: 'legendonly',
-                hoverinfo: 'skip'
+                x: plotData.map(d => d.date), y: plotData.map(d => d.ma5),
+                mode: 'lines', name: '5MA', line: { color: '#f59e0b', width: 1.2 }, visible: 'legendonly', hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
             });
             traces.push({
-                x: plotData.map(d => d.date),
-                y: plotData.map(d => d.ma10),
-                mode: 'lines',
-                name: '10MA',
-                line: { color: '#84cc16', width: 1.2 },
-                visible: 'legendonly',
-                hoverinfo: 'skip'
+                x: plotData.map(d => d.date), y: plotData.map(d => d.ma10),
+                mode: 'lines', name: '10MA', line: { color: '#84cc16', width: 1.2 }, visible: 'legendonly', hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
             });
             traces.push({
-                x: plotData.map(d => d.date),
-                y: plotData.map(d => d.ma20),
-                mode: 'lines',
-                name: '20MA',
-                line: { color: '#a855f7', width: 1.2 },
-                visible: true,
-                hoverinfo: 'skip'
+                x: plotData.map(d => d.date), y: plotData.map(d => d.ma20),
+                mode: 'lines', name: '20MA', line: { color: '#a855f7', width: 1.2 }, visible: true, hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
             });
             traces.push({
-                x: plotData.map(d => d.date),
-                y: plotData.map(d => d.ma60),
-                mode: 'lines',
-                name: '60MA',
-                line: { color: '#ffffff', width: 1.2 },
-                visible: true,
-                hoverinfo: 'skip'
+                x: plotData.map(d => d.date), y: plotData.map(d => d.ma60),
+                mode: 'lines', name: '60MA', line: { color: '#ffffff', width: 1.2 }, visible: true, hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
             });
             traces.push({
-                x: plotData.map(d => d.date),
-                y: plotData.map(d => d.ma120),
-                mode: 'lines',
-                name: '120MA',
-                line: { color: '#ff1493', width: 1.2 },
-                visible: true,
-                hoverinfo: 'skip'
+                x: plotData.map(d => d.date), y: plotData.map(d => d.ma120),
+                mode: 'lines', name: '120MA', line: { color: '#ff1493', width: 1.2 }, visible: true, hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
             });
 
             // 原始指數折線
             traces.push({
-                x: plotData.map(d => d.date),
-                y: plotData.map(d => d.close),
-                mode: 'lines',
-                name: 'TAIEX Close',
-                line: { color: 'rgba(255,255,255,0.2)', width: 1 },
-                hoverinfo: 'skip'
+                x: plotData.map(d => d.date), y: plotData.map(d => d.close),
+                mode: 'lines', name: 'TAIEX Close', line: { color: 'rgba(255,255,255,0.2)', width: 1 }, hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
             });
 
-            const latestPoint = plotData[plotData.length - 1];
-            const latestDateString = latestPoint.date;
-            const latestDate = new Date(latestDateString);
+            // 恐慌得分柱狀圖 Trace (底部子圖)
+            traces.push({
+                x: plotData.map(d => d.date),
+                y: plotData.map(d => d.panicScore),
+                type: 'bar',
+                name: '恐慌得分 (Panic Score)',
+                xaxis: 'x',
+                yaxis: 'y2',
+                marker: {
+                    color: plotData.map(d => d.panicScore > 1.0 ? '#ef4444' : (d.panicScore > 0 ? '#f97316' : '#38bdf8'))
+                },
+                hovertemplate: '日期: %{x}<br>恐慌得分: %{y:.2f}<extra></extra>'
+            });
 
+            // 計算近一年數據的起始索引位置
+            const latestDateString = plotData[plotData.length - 1].date;
+            const latestDate = new Date(latestDateString);
             const oneYearAgo = new Date(latestDate);
             oneYearAgo.setFullYear(latestDate.getFullYear() - 1);
 
-            const endDisplayDate = new Date(latestDate);
-            endDisplayDate.setDate(endDisplayDate.getDate() + 2); 
+            let startIndex = plotData.findIndex(d => new Date(d.date) >= oneYearAgo);
+            if (startIndex === -1) startIndex = 0;
+            let endIndex = plotData.length - 1;
 
-            const formatDate = (dateObj) => {
-                const y = dateObj.getFullYear();
-                const m = String(dateObj.getMonth() + 1).padStart(2, '0');
-                const d = String(dateObj.getDate()).padStart(2, '0');
-                return `${y}-${m}-${d}`;
-            };
-
-            const rangeStart = formatDate(oneYearAgo);
-            const rangeEnd = formatDate(endDisplayDate);
-
+            // 配置雙 Y 軸與 Category 橫軸 Layout
             Plotly.newPlot('chart', traces, {
                 paper_bgcolor: 'rgba(0,0,0,0)',
                 plot_bgcolor: 'rgba(0,0,0,0)',
                 font: { color: '#fff' },
-                margin: { t: 50, r: 50, l: 60, b: 50 },
+                margin: { t: 50, r: 30, l: 60, b: 50 },
+                grid: { rows: 2, columns: 1, roworder: 'top to bottom' },
                 xaxis: { 
                     gridcolor: '#334155',
-                    type: 'date',
-                    tickformat: '%Y-%m-%d',
-                    range: [rangeStart, rangeEnd], 
+                    type: 'category', // 設定為類別軸，徹底連貫所有交易日
+                    nticks: 12,
+                    range: [startIndex, endIndex + 0.5], 
                     rangeslider: { visible: true, bgcolor: '#0f172a' }
                 },
                 yaxis: { 
+                    title: 'TAIEX 指數', 
                     gridcolor: '#334155',
-                    title: '加權指數'
+                    domain: [0.32, 1.0]
                 },
-                yaxis2: {
-                    title: '恐慌分數 (0-100)',
-                    titlefont: { color: '#f59e0b' },
-                    tickfont: { color: '#f59e0b' },
-                    overlaying: 'y',
-                    side: 'right',
-                    range: [0, 200], // 0-200 讓柱狀圖維持在圖表下半部(0-100分占下半部)，不遮擋 K 線
-                    showgrid: false,
-                    zeroline: false
+                yaxis2: { 
+                    title: '恐慌得分', 
+                    gridcolor: '#334155',
+                    domain: [0.0, 0.22],
+                    zerolinecolor: '#475569',
+                    zerolinewidth: 1.5
                 },
-                title: 'TAIEX 市場位階與恐慌分數分析圖表',
+                title: 'TAIEX 市場位階聚類與恐慌向量得分 (連續交易日排列)',
                 hovermode: 'closest', 
                 hoverlabel: {
                     bgcolor: '#1e293b', 
@@ -550,36 +504,48 @@
                 }
             });
 
-            // 動態調整 Y 軸範圍
+            // 動態調整頂部 Y 軸範圍（相容 Category 軸索引與字串）
             const chartDiv = document.getElementById('chart');
             chartDiv.on('plotly_relayout', function(eventData) {
-                if (eventData['xaxis.range[0]'] || eventData['xaxis.range']) {
-                    let xStart = eventData['xaxis.range[0]'] || eventData['xaxis.range'][0];
-                    let xEnd = eventData['xaxis.range[1]'] || eventData['xaxis.range'][1];
-                    
-                    let startTime = new Date(xStart).getTime();
-                    let endTime = new Date(xEnd).getTime();
+                let xRange = eventData['xaxis.range'] || (eventData['xaxis.range[0]'] !== undefined ? [eventData['xaxis.range[0]'], eventData['xaxis.range[1]']] : null);
+                
+                if (xRange && xRange[0] !== undefined) {
+                    let xStart = xRange[0];
+                    let xEnd = xRange[1];
+                    let startIdx, endIdx;
+
+                    if (typeof xStart === 'number') {
+                        startIdx = Math.max(0, Math.floor(xStart));
+                        endIdx = Math.min(plotData.length - 1, Math.ceil(xEnd));
+                    } else {
+                        let startTime = new Date(xStart).getTime();
+                        let endTime = new Date(xEnd).getTime();
+                        startIdx = plotData.findIndex(d => new Date(d.date).getTime() >= startTime);
+                        endIdx = plotData.reduce((last, d, idx) => new Date(d.date).getTime() <= endTime ? idx : last, plotData.length - 1);
+                    }
+
+                    if (startIdx < 0) startIdx = 0;
+                    if (endIdx < 0 || endIdx >= plotData.length) endIdx = plotData.length - 1;
 
                     let minY = Infinity;
                     let maxY = -Infinity;
 
-                    plotData.forEach(d => {
-                        let dTime = new Date(d.date).getTime();
-                        if (dTime >= startTime && dTime <= endTime) {
-                            let yValues = [d.close];
-                            if (d.ma5 !== null) yValues.push(d.ma5);
-                            if (d.ma10 !== null) yValues.push(d.ma10);
-                            if (d.ma20 !== null) yValues.push(d.ma20);
-                            if (d.ma60 !== null) yValues.push(d.ma60);
-                            if (d.ma120 !== null) yValues.push(d.ma120);
+                    for (let i = startIdx; i <= endIdx; i++) {
+                        let d = plotData[i];
+                        if (!d) continue;
+                        let yValues = [d.close];
+                        if (d.ma5 !== null) yValues.push(d.ma5);
+                        if (d.ma10 !== null) yValues.push(d.ma10);
+                        if (d.ma20 !== null) yValues.push(d.ma20);
+                        if (d.ma60 !== null) yValues.push(d.ma60);
+                        if (d.ma120 !== null) yValues.push(d.ma120);
 
-                            let localMin = Math.min(...yValues);
-                            let localMax = Math.max(...yValues);
+                        let localMin = Math.min(...yValues);
+                        let localMax = Math.max(...yValues);
 
-                            if (localMin < minY) minY = localMin;
-                            if (localMax > maxY) maxY = localMax;
-                        }
-                    });
+                        if (localMin < minY) minY = localMin;
+                        if (localMax > maxY) maxY = localMax;
+                    }
 
                     if (minY !== Infinity && maxY !== -Infinity) {
                         let padding = (maxY - minY) * 0.05; 
@@ -598,7 +564,7 @@
             });
 
             document.getElementById('statusBox').style.borderColor = '#10b981';
-            document.getElementById('statusText').innerText = `分析完成：已處理 ${finalDf.length} 筆交易日數據。最新數據 (${latestPoint.date}) - 指數: ${latestPoint.close.toLocaleString()}，恐慌分數: ${latestPoint.panicScore}。`;
+            document.getElementById('statusText').innerText = `分析完成：已處理 ${finalDf.length} 筆交易日數據，橫軸已設定為連續交易日排列（無週末空白）。預設顯示近一年數據。`;
             document.getElementById('loader').style.display = 'none';
 
         } catch (err) {
