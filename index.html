@@ -153,7 +153,6 @@
 </div>
 
 <script>
-    // 預設日期設定
     const today = new Date();
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth() + 1).padStart(2, '0');
@@ -377,7 +376,6 @@
             if (countNormal > 0) cNormal = cNormal.map(v => v / countNormal);
             if (countPanic > 0) cPanic = cPanic.map(v => v / countPanic);
 
-            // 恐慌單位向量
             let vPanic = new Array(6);
             let vPanicNormSq = 0;
             for (let d = 0; d < 6; d++) {
@@ -387,7 +385,6 @@
             let vPanicNorm = Math.sqrt(vPanicNormSq);
             let vPanicUnit = vPanic.map(v => vPanicNorm > 0 ? v / vPanicNorm : 0);
 
-            // 計算 Panic Score
             for (let i = 0; i < finalDf.length; i++) {
                 let score = 0;
                 for (let d = 0; d < 6; d++) {
@@ -398,10 +395,42 @@
 
             const plotData = finalDf;
             const plotClusters = allClusters;
+            const allDates = plotData.map(d => d.date); // 完整時間順序陣列
 
-            let traces = Object.keys(regimeMap).map(cid => {
+            let traces = [];
+
+            // 1. 先加入完整歷史的指數主線 (確保時間軸優先註冊)
+            traces.push({
+                x: allDates, y: plotData.map(d => d.close),
+                mode: 'lines', name: 'TAIEX Close', line: { color: 'rgba(255,255,255,0.2)', width: 1 }, hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
+            });
+
+            // 2. 加入均線 Traces
+            traces.push({
+                x: allDates, y: plotData.map(d => d.ma5),
+                mode: 'lines', name: '5MA', line: { color: '#f59e0b', width: 1.2 }, visible: 'legendonly', hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
+            });
+            traces.push({
+                x: allDates, y: plotData.map(d => d.ma10),
+                mode: 'lines', name: '10MA', line: { color: '#84cc16', width: 1.2 }, visible: 'legendonly', hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
+            });
+            traces.push({
+                x: allDates, y: plotData.map(d => d.ma20),
+                mode: 'lines', name: '20MA', line: { color: '#a855f7', width: 1.2 }, visible: true, hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
+            });
+            traces.push({
+                x: allDates, y: plotData.map(d => d.ma60),
+                mode: 'lines', name: '60MA', line: { color: '#ffffff', width: 1.2 }, visible: true, hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
+            });
+            traces.push({
+                x: allDates, y: plotData.map(d => d.ma120),
+                mode: 'lines', name: '120MA', line: { color: '#ff1493', width: 1.2 }, visible: true, hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
+            });
+
+            // 3. 加入 K-Means 買賣位階分群散點圖
+            Object.keys(regimeMap).forEach(cid => {
                 let subset = plotData.filter((_, i) => plotClusters[i] == cid);
-                return {
+                traces.push({
                     x: subset.map(d => d.date),
                     y: subset.map(d => d.close),
                     customdata: subset.map(d => {
@@ -414,40 +443,12 @@
                     yaxis: 'y',
                     marker: { color: regimeMap[cid].color, size: 6 },
                     hovertemplate: '日期: %{x}<br>指數: %{y:,.0f}<br>成交量: %{customdata}<extra></extra>' 
-                };
+                });
             });
 
-            // 均線 Traces
+            // 4. 底部恐慌得分柱狀圖
             traces.push({
-                x: plotData.map(d => d.date), y: plotData.map(d => d.ma5),
-                mode: 'lines', name: '5MA', line: { color: '#f59e0b', width: 1.2 }, visible: 'legendonly', hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
-            });
-            traces.push({
-                x: plotData.map(d => d.date), y: plotData.map(d => d.ma10),
-                mode: 'lines', name: '10MA', line: { color: '#84cc16', width: 1.2 }, visible: 'legendonly', hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
-            });
-            traces.push({
-                x: plotData.map(d => d.date), y: plotData.map(d => d.ma20),
-                mode: 'lines', name: '20MA', line: { color: '#a855f7', width: 1.2 }, visible: true, hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
-            });
-            traces.push({
-                x: plotData.map(d => d.date), y: plotData.map(d => d.ma60),
-                mode: 'lines', name: '60MA', line: { color: '#ffffff', width: 1.2 }, visible: true, hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
-            });
-            traces.push({
-                x: plotData.map(d => d.date), y: plotData.map(d => d.ma120),
-                mode: 'lines', name: '120MA', line: { color: '#ff1493', width: 1.2 }, visible: true, hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
-            });
-
-            // 原始指數折線
-            traces.push({
-                x: plotData.map(d => d.date), y: plotData.map(d => d.close),
-                mode: 'lines', name: 'TAIEX Close', line: { color: 'rgba(255,255,255,0.2)', width: 1 }, hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
-            });
-
-            // 恐慌得分柱狀圖 Trace (底部子圖)
-            traces.push({
-                x: plotData.map(d => d.date),
+                x: allDates,
                 y: plotData.map(d => d.panicScore),
                 type: 'bar',
                 name: '恐慌得分 (Panic Score)',
@@ -459,7 +460,7 @@
                 hovertemplate: '日期: %{x}<br>恐慌得分: %{y:.2f}<extra></extra>'
             });
 
-            // 計算近一年數據的起始索引位置
+            // 計算近一年數據起始位置
             const latestDateString = plotData[plotData.length - 1].date;
             const latestDate = new Date(latestDateString);
             const oneYearAgo = new Date(latestDate);
@@ -469,7 +470,6 @@
             if (startIndex === -1) startIndex = 0;
             let endIndex = plotData.length - 1;
 
-            // 配置雙 Y 軸與 Category 橫軸 Layout
             Plotly.newPlot('chart', traces, {
                 paper_bgcolor: 'rgba(0,0,0,0)',
                 plot_bgcolor: 'rgba(0,0,0,0)',
@@ -478,7 +478,9 @@
                 grid: { rows: 2, columns: 1, roworder: 'top to bottom' },
                 xaxis: { 
                     gridcolor: '#334155',
-                    type: 'category', // 設定為類別軸，徹底連貫所有交易日
+                    type: 'category',
+                    categoryorder: 'array',
+                    categoryarray: allDates, // 強制指定正確時間順序
                     nticks: 12,
                     range: [startIndex, endIndex + 0.5], 
                     rangeslider: { visible: true, bgcolor: '#0f172a' }
@@ -504,7 +506,7 @@
                 }
             });
 
-            // 動態調整頂部 Y 軸範圍（相容 Category 軸索引與字串）
+            // 動態 Y 軸範圍校正監聽器
             const chartDiv = document.getElementById('chart');
             chartDiv.on('plotly_relayout', function(eventData) {
                 let xRange = eventData['xaxis.range'] || (eventData['xaxis.range[0]'] !== undefined ? [eventData['xaxis.range[0]'], eventData['xaxis.range[1]']] : null);
@@ -518,14 +520,13 @@
                         startIdx = Math.max(0, Math.floor(xStart));
                         endIdx = Math.min(plotData.length - 1, Math.ceil(xEnd));
                     } else {
-                        let startTime = new Date(xStart).getTime();
-                        let endTime = new Date(xEnd).getTime();
-                        startIdx = plotData.findIndex(d => new Date(d.date).getTime() >= startTime);
-                        endIdx = plotData.reduce((last, d, idx) => new Date(d.date).getTime() <= endTime ? idx : last, plotData.length - 1);
+                        startIdx = plotData.findIndex(d => d.date === xStart);
+                        endIdx = plotData.findIndex(d => d.date === xEnd);
+                        if (startIdx === -1) startIdx = 0;
+                        if (endIdx === -1) endIdx = plotData.length - 1;
                     }
 
-                    if (startIdx < 0) startIdx = 0;
-                    if (endIdx < 0 || endIdx >= plotData.length) endIdx = plotData.length - 1;
+                    if (startIdx > endIdx) { let tmp = startIdx; startIdx = endIdx; endIdx = tmp; }
 
                     let minY = Infinity;
                     let maxY = -Infinity;
@@ -534,11 +535,11 @@
                         let d = plotData[i];
                         if (!d) continue;
                         let yValues = [d.close];
-                        if (d.ma5 !== null) yValues.push(d.ma5);
-                        if (d.ma10 !== null) yValues.push(d.ma10);
-                        if (d.ma20 !== null) yValues.push(d.ma20);
-                        if (d.ma60 !== null) yValues.push(d.ma60);
-                        if (d.ma120 !== null) yValues.push(d.ma120);
+                        if (d.ma5 !== null && !isNaN(d.ma5)) yValues.push(d.ma5);
+                        if (d.ma10 !== null && !isNaN(d.ma10)) yValues.push(d.ma10);
+                        if (d.ma20 !== null && !isNaN(d.ma20)) yValues.push(d.ma20);
+                        if (d.ma60 !== null && !isNaN(d.ma60)) yValues.push(d.ma60);
+                        if (d.ma120 !== null && !isNaN(d.ma120)) yValues.push(d.ma120);
 
                         let localMin = Math.min(...yValues);
                         let localMax = Math.max(...yValues);
@@ -564,7 +565,7 @@
             });
 
             document.getElementById('statusBox').style.borderColor = '#10b981';
-            document.getElementById('statusText').innerText = `分析完成：已處理 ${finalDf.length} 筆交易日數據，橫軸已設定為連續交易日排列（無週末空白）。預設顯示近一年數據。`;
+            document.getElementById('statusText').innerText = `分析完成：已處理 ${finalDf.length} 筆交易日數據，時間軸排序與均線繪製已修正。`;
             document.getElementById('loader').style.display = 'none';
 
         } catch (err) {
