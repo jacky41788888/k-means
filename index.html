@@ -376,36 +376,36 @@
             if (countNormal > 0) cNormal = cNormal.map(v => v / countNormal);
             if (countPanic > 0) cPanic = cPanic.map(v => v / countPanic);
 
+            // 恐慌向量 V_panic = C_panic - C_normal 以及向量模長平方 ||V_panic||^2
             let vPanic = new Array(6);
             let vPanicNormSq = 0;
             for (let d = 0; d < 6; d++) {
                 vPanic[d] = cPanic[d] - cNormal[d];
                 vPanicNormSq += vPanic[d] * vPanic[d];
             }
-            let vPanicNorm = Math.sqrt(vPanicNormSq);
-            let vPanicUnit = vPanic.map(v => vPanicNorm > 0 ? v / vPanicNorm : 0);
 
+            // 計算相對恐慌得分 (使 C_normal = 0.0, C_panic = 1.0)
             for (let i = 0; i < finalDf.length; i++) {
-                let score = 0;
+                let dotProduct = 0;
                 for (let d = 0; d < 6; d++) {
-                    score += (scaledX[i][d] - cNormal[d]) * vPanicUnit[d];
+                    dotProduct += (scaledX[i][d] - cNormal[d]) * vPanic[d];
                 }
-                finalDf[i].panicScore = score;
+                finalDf[i].panicScore = vPanicNormSq > 0 ? (dotProduct / vPanicNormSq) : 0;
             }
 
             const plotData = finalDf;
             const plotClusters = allClusters;
-            const allDates = plotData.map(d => d.date); // 完整時間順序陣列
+            const allDates = plotData.map(d => d.date);
 
             let traces = [];
 
-            // 1. 先加入完整歷史的指數主線 (確保時間軸優先註冊)
+            // 1. 指數主線
             traces.push({
                 x: allDates, y: plotData.map(d => d.close),
                 mode: 'lines', name: 'TAIEX Close', line: { color: 'rgba(255,255,255,0.2)', width: 1 }, hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
             });
 
-            // 2. 加入均線 Traces
+            // 2. 均線 Traces
             traces.push({
                 x: allDates, y: plotData.map(d => d.ma5),
                 mode: 'lines', name: '5MA', line: { color: '#f59e0b', width: 1.2 }, visible: 'legendonly', hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
@@ -427,7 +427,7 @@
                 mode: 'lines', name: '120MA', line: { color: '#ff1493', width: 1.2 }, visible: true, hoverinfo: 'skip', xaxis: 'x', yaxis: 'y'
             });
 
-            // 3. 加入 K-Means 買賣位階分群散點圖
+            // 3. K-Means 聚類點
             Object.keys(regimeMap).forEach(cid => {
                 let subset = plotData.filter((_, i) => plotClusters[i] == cid);
                 traces.push({
@@ -446,7 +446,7 @@
                 });
             });
 
-            // 4. 底部恐慌得分柱狀圖
+            // 4. 相對恐慌得分柱狀圖
             traces.push({
                 x: allDates,
                 y: plotData.map(d => d.panicScore),
@@ -460,7 +460,6 @@
                 hovertemplate: '日期: %{x}<br>恐慌得分: %{y:.2f}<extra></extra>'
             });
 
-            // 計算近一年數據起始位置
             const latestDateString = plotData[plotData.length - 1].date;
             const latestDate = new Date(latestDateString);
             const oneYearAgo = new Date(latestDate);
@@ -480,7 +479,7 @@
                     gridcolor: '#334155',
                     type: 'category',
                     categoryorder: 'array',
-                    categoryarray: allDates, // 強制指定正確時間順序
+                    categoryarray: allDates,
                     nticks: 12,
                     range: [startIndex, endIndex + 0.5], 
                     rangeslider: { visible: true, bgcolor: '#0f172a' }
@@ -491,7 +490,7 @@
                     domain: [0.32, 1.0]
                 },
                 yaxis2: { 
-                    title: '恐慌得分', 
+                    title: '恐慌得分 (基於 C_panic=1.0)', 
                     gridcolor: '#334155',
                     domain: [0.0, 0.22],
                     zerolinecolor: '#475569',
@@ -506,7 +505,6 @@
                 }
             });
 
-            // 動態 Y 軸範圍校正監聽器
             const chartDiv = document.getElementById('chart');
             chartDiv.on('plotly_relayout', function(eventData) {
                 let xRange = eventData['xaxis.range'] || (eventData['xaxis.range[0]'] !== undefined ? [eventData['xaxis.range[0]'], eventData['xaxis.range[1]']] : null);
@@ -565,7 +563,7 @@
             });
 
             document.getElementById('statusBox').style.borderColor = '#10b981';
-            document.getElementById('statusText').innerText = `分析完成：已處理 ${finalDf.length} 筆交易日數據，時間軸排序與均線繪製已修正。`;
+            document.getElementById('statusText').innerText = `分析完成：已處理 ${finalDf.length} 筆交易日數據，恐慌得分已校正為以恐慌質心（C_panic=1.0）為基準。`;
             document.getElementById('loader').style.display = 'none';
 
         } catch (err) {
